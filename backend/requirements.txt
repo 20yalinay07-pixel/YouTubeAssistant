@@ -1,0 +1,12 @@
+flask>=3.0.0
+flask-cors>=4.0.0
+python-dotenv>=1.0.0  # proje kokundeki .env dosyasindan API anahtarlarini okumak icin
+youtube-transcript-api>=1.0.0  # instance tabanli (.list()) API bu surumden itibaren var, eski statik API kaldirildi
+bgutil-ytdlp-pot-provider>=1.3.2  # yt-dlp icin PO Token (Proof of Origin) saglayicisi -- altyazi 429/bot-tespiti sorununu cozen tek gercekten calisan ucretsiz yontem (test edildi, dogrulandi). Ayrica backend/pot_server/ altinda calisan yerel bir Node.js sunucusu gerektirir (bkz. tray_launcher.py start_pot_server()).
+langdetect>=1.0.9  # transkriptin konusuldugu orijinal dili hizlica (AI cagrisi olmadan, ~1ms) algilamak icin
+openai>=1.12.0
+requests>=2.32.0
+yt-dlp>=2024.4.9
+curl_cffi>=0.10,<0.16  # yt-dlp'nin tarayici TLS taklidi (--impersonate) icin; 0.16+ bu yt-dlp surumuyle uyumsuz
+pystray>=0.19.5
+Pillow>=10.0.0
