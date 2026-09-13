@@ -122,27 +122,30 @@ A gold **⭐ Extra Features** button at the bottom of the main menu toggles two 
 
 **⏩ Auto Ad Skip** — auto-clicks YouTube's own "Skip Ad" button the instant it appears, and briefly speeds up playback during the mandatory pre-skip portion of an ad. It doesn't block ad requests or remove ad elements from the page — it only clicks YouTube's own button and adjusts playback speed, so it isn't expected to trigger the usual ad-blocker warnings. YouTube could still change how it detects this in the future; just turn the switch off if that ever happens.
 
-*A note on "Premium":* since this is a personal local tool, there's no real payment system, account, or license server behind these — building one would need its own backend, payment processing, and auth, which isn't practical here. "Premium" is just a conceptual label; you flip these on and off yourself, there's no actual lock.
+Unlocking them for real (as paid subscriptions) is covered next.
 
 ## Premium: selling Ad-Skip and Unlimited Chat
 
 The ⭐ Extra Features (unlimited chat, auto ad-skip) can be sold as real paid subscriptions. This is a genuinely separate system from the local backend above — it needs to be reachable from the internet 24/7, since it answers "is this license key currently active" for every buyer, not just you.
 
-**Architecture:**
+**Architecture — two separate services, one shared database:**
 
 ```
-Buyer's browser --checkout--> Lemon Squeezy --webhook--> licensing_server (Render)
+Buyer's browser --checkout--> Lemon Squeezy --webhook--> licensing_server (Render, public)
                                                                 |
 Extension -------- POST /api/license/verify -------------------+
                                                                 |
-You -------------- /admin (password-protected) -----------------
+                                                          shared database
+                                                                |
+You (own machine) ---- licensing_admin (local only, never deployed)
 ```
 
-- `licensing_server/` is a standalone Flask app (own `requirements.txt`) — deploy it separately from `backend/`.
-- It never touches raw card numbers. Checkout happens entirely on Lemon Squeezy's own hosted page; card data never reaches your code.
+- `licensing_server/` is the **public** piece — landing page, checkout links, webhook receiver, license verification API. Deploy this to Render (or any Flask host).
+- `licensing_admin/` is the **admin dashboard** — deliberately kept out of the public repo (it's in `.gitignore`) and never deployed anywhere. You run it with `python app.py` only on your own computer, pointed at the same production database, whenever you want to check subscribers or revoke access. This means the internet-facing service has zero admin/login surface at all.
+- Neither service ever touches raw card numbers. Checkout happens entirely on Lemon Squeezy's own hosted page; card data never reaches your code.
 - **You** control the actual payout bank account/card in Lemon Squeezy's own dashboard (Settings → Payouts) — this is not something the app builds a custom screen for, since Lemon Squeezy already handles it securely as your merchant of record.
 
-**1) Create your Lemon Squeezy products.** In your [Lemon Squeezy](https://www.lemonsqueezy.com/) dashboard, create a store, then 3 subscription products/variants:
+**1) Create your Lemon Squeezy products.** In your [Lemon Squeezy](https://digitalhelperforall.lemonsqueezy.com) store, create 3 subscription products/variants:
 
 | Product | Price |
 |---|---|
@@ -156,11 +159,10 @@ For each, open the product → copy its **checkout URL**.
 
 - New Web Service → connect this repo → root directory `licensing_server` → build command `pip install -r requirements.txt` → start command `gunicorn app:app`.
 - Set these environment variables in Render's dashboard (not a committed file):
-  - `ADMIN_PASSWORD` — your own password for `/admin`.
   - `FLASK_SECRET_KEY` — any long random string.
   - `LEMONSQUEEZY_WEBHOOK_SECRET` — set after step 3.
   - `LS_CHECKOUT_URL_BUNDLE`, `LS_CHECKOUT_URL_CHAT`, `LS_CHECKOUT_URL_ADSKIP` — the checkout URLs from step 1.
-  - `DATABASE_URL` — a Postgres connection string (e.g. from [Neon](https://neon.tech) or [Supabase](https://supabase.com)'s free tier — Render's own free web services don't keep a persistent disk, so SQLite would reset on every restart).
+  - `DATABASE_URL` — a Postgres connection string (e.g. from [Neon](https://neon.tech) or [Supabase](https://supabase.com)'s free tier — Render's own free web services don't keep a persistent disk, so SQLite would reset on every restart). **Use this exact same connection string locally for `licensing_admin/`** (its own `.env`, copied from `.env.example`) — that's what lets the local admin dashboard see the same subscribers.
 
 **3) Point Lemon Squeezy's webhook at your new URL.** In Lemon Squeezy: Settings → Webhooks → add `https://your-app.onrender.com/webhook/lemonsqueezy`, subscribe to `subscription_created`, `subscription_updated`, `subscription_cancelled`, `subscription_expired`, `subscription_resumed`. Copy its **Signing secret** into `LEMONSQUEEZY_WEBHOOK_SECRET` on Render.
 
@@ -173,7 +175,7 @@ const LICENSE_SERVER_URL = 'https://your-app.onrender.com';
 const LICENSE_MARKETING_URL = 'https://your-app.onrender.com';
 ```
 
-That's it — buyers land on `/`, subscribe, get a license key on `/success`, paste it into the ⭐ Extra Features panel, and the extension calls `/api/license/verify` to unlock exactly what they paid for. You manage everyone from `/admin` — see subscribers, MRR, and manually grant or revoke access.
+That's it — buyers land on `/`, subscribe, get a license key on `/success`, paste it into the ⭐ Extra Features panel, and the extension calls `/api/license/verify` to unlock exactly what they paid for. To check on subscribers or revoke access, run `python app.py` inside `licensing_admin/` on your own machine and open `http://127.0.0.1:5050`.
 
 ## Project layout
 
@@ -184,6 +186,8 @@ backend/
   ytdlp_bypass.py      yt-dlp evasion helpers
   requirements.txt
 pot_server/            Local Node.js server that defeats YouTube's 429/bot blocking
+licensing_server/      Public: landing page, Lemon Squeezy webhook, license verification API
+licensing_admin/       Local-only admin dashboard (gitignored — never deployed, never on GitHub)
 content.js              Chrome content script — the panel UI itself
 manifest.json           Extension manifest (Manifest V3)
 start_hidden.vbs        Launches everything with no visible window

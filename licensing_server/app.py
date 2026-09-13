@@ -7,11 +7,18 @@ kendi bilgisayarinda, sadece kendi AI anahtarlariyla calisir. BU servis
 sadece "bu lisans anahtari gecerli mi, hangi ozellikleri aciyor" sorusunu
 cevaplar ve Lemon Squeezy'den gelen odeme olaylarini isler.
 
+Admin paneli BILEREK burada DEGIL -- ayri ve HIC deploy edilmeyen
+`licensing_admin/` klasorunde (bkz. o klasorun README/docstring'i). Boylece
+bu herkese acik servisin internetten erisilebilir HICBIR admin/sifre
+endpoint'i olmuyor, saldiri yuzeyi kuculuyor.
+
+Lemon Squeezy magazasi: https://digitalhelperforall.lemonsqueezy.com
+
 Ortam degiskenleri (.env veya hosting panelinden):
-  DATABASE_URL              -- SQLAlchemy baglanti string'i (varsayilan: yerel sqlite, gelistirme icin)
-  LEMONSQUEEZY_WEBHOOK_SECRET -- Lemon Squeezy panelinde webhook olustururken belirlenen "Signing secret"
-  ADMIN_PASSWORD            -- /admin paneline girmek icin sifre
-  FLASK_SECRET_KEY          -- oturum (session) cookie'lerini imzalamak icin rastgele bir metin
+  DATABASE_URL                -- SQLAlchemy baglanti string'i (varsayilan: yerel sqlite, gelistirme icin)
+  LEMONSQUEEZY_WEBHOOK_SECRET  -- Lemon Squeezy panelinde webhook olustururken belirlenen "Signing secret"
+  FLASK_SECRET_KEY             -- oturum (session) cookie'lerini imzalamak icin rastgele bir metin
+  LS_CHECKOUT_URL_BUNDLE/CHAT/ADSKIP -- her urunun checkout linki
 """
 
 import hashlib
@@ -19,9 +26,8 @@ import hmac
 import os
 import secrets
 from datetime import datetime, timezone
-from functools import wraps
 
-from flask import Flask, jsonify, request, render_template, redirect, url_for, session
+from flask import Flask, jsonify, request, render_template
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
 from dotenv import load_dotenv
@@ -40,7 +46,6 @@ app.config["SQLALCHEMY_DATABASE_URI"] = DATABASE_URL
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 db = SQLAlchemy(app)
 
-ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
 LEMONSQUEEZY_WEBHOOK_SECRET = os.environ.get("LEMONSQUEEZY_WEBHOOK_SECRET", "")
 
 # Lemon Squeezy'de 3 urunu (Bundle $40, Ad Skip $15, Unlimited Chat $30)
@@ -228,59 +233,6 @@ def success_page():
     email = (request.values.get("email") or "").strip().lower()
     lic = License.query.filter_by(email=email).order_by(License.created_at.desc()).first() if email else None
     return render_template("success.html", license=lic, email=email, searched=bool(email))
-
-
-# ==================== ADMIN PANELI ====================
-
-def admin_required(fn):
-    @wraps(fn)
-    def wrapper(*args, **kwargs):
-        if not session.get("is_admin"):
-            return redirect(url_for("admin_login"))
-        return fn(*args, **kwargs)
-    return wrapper
-
-
-@app.route("/admin/login", methods=["GET", "POST"])
-def admin_login():
-    error = None
-    if request.method == "POST":
-        if ADMIN_PASSWORD and request.form.get("password") == ADMIN_PASSWORD:
-            session["is_admin"] = True
-            return redirect(url_for("admin_dashboard"))
-        error = "Yanlış şifre."
-    return render_template("admin_login.html", error=error)
-
-
-@app.route("/admin/logout")
-def admin_logout():
-    session.pop("is_admin", None)
-    return redirect(url_for("admin_login"))
-
-
-@app.route("/admin")
-@admin_required
-def admin_dashboard():
-    licenses = License.query.order_by(License.created_at.desc()).all()
-    active = [l for l in licenses if l.status == "active"]
-    mrr = sum(PLAN_INFO.get(l.plan, {}).get("price_usd", 0) for l in active)
-    stats = {
-        "total": len(licenses),
-        "active": len(active),
-        "mrr_usd": mrr,
-        "by_plan": {p: len([l for l in active if l.plan == p]) for p in PLAN_INFO},
-    }
-    return render_template("admin_dashboard.html", licenses=licenses, stats=stats, plans=PLAN_INFO)
-
-
-@app.route("/admin/license/<int:license_id>/toggle", methods=["POST"])
-@admin_required
-def admin_toggle_license(license_id):
-    lic = License.query.get_or_404(license_id)
-    lic.status = "cancelled" if lic.status == "active" else "active"
-    lic.manual_override = True  # bir sonraki webhook bunu otomatik geri almasin
-    db.session.commit()
-    return redirect(url_for("admin_dashboard"))
 
 
 @app.route("/health")
