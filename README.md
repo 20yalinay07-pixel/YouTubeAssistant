@@ -63,6 +63,20 @@ EXA_SEARCH_API_KEY=...
 
 Without this file the backend can't make any AI call. It's loaded automatically on startup via `python-dotenv` — nothing is hardcoded in the source.
 
+**Alternative: one key instead of five.** Signing up for Groq, OmniRoute, AssemblyAI (twice) and Exa separately is real setup friction if you're not the original author. [FreeLLMAPI](https://github.com/tashfeenahmed/freellmapi) is a self-hosted proxy that aggregates 34+ free-tier LLM providers behind a single OpenAI-compatible key:
+
+```bash
+curl -fsSL https://freellmapi.co/install.sh | bash
+```
+
+Add provider keys and grab your unified key from its dashboard at `http://localhost:3001`, then in your `.env` set just:
+
+```
+FREELLMAPI_API_KEY=freellmapi-your-unified-key
+```
+
+The backend already treats it as an extra fallback provider (after Groq, OpenRouter, and OmniRoute) — if you skip the other keys entirely, this one alone is enough to make every AI feature work. It requires Docker; if that's not something you want running, stick with the individual keys above.
+
 **1) Backend dependencies:**
 
 ```bash

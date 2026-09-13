@@ -122,6 +122,18 @@ ASSEMBLYAI_API_KEY_SUMMARIZE = os.environ.get("ASSEMBLYAI_API_KEY_SUMMARIZE", ""
 ASSEMBLYAI_API_KEY_CHAPTERS = os.environ.get("ASSEMBLYAI_API_KEY_CHAPTERS", "")    # "VideoBolumleyici" hesabi
 EXA_SEARCH_API_KEY = os.environ.get("EXA_SEARCH_API_KEY", "")                      # "video önerici" hesabi
 
+# OPSIYONEL 4. yedek: FreeLLMAPI (https://github.com/tashfeenahmed/freellmapi) --
+# yerelde Docker ile calisan, 34+ ucretsiz LLM saglayicisini TEK bir OpenAI-uyumlu
+# anahtar arkasinda toplayan bagimsiz bir proxy. BU KULLANICI icin zorunlu DEGIL
+# (Groq/OmniRoute/OpenRouter zaten calisiyor, siralama degismiyor) -- ama .env'de
+# FREELLMAPI_API_KEY tanimlanmazsa asagidaki provider listesinde otomatik atlanir,
+# tanimlanirsa en sona (son care) eklenir. Boylece YENI bir kullanici, Groq/
+# OmniRoute/AssemblyAI/Exa icin ayri ayri hesap acmak yerine SADECE FreeLLMAPI'yi
+# kurup TEK anahtarla projeyi calistirabilir (diger 3 saglayicinin anahtari bos
+# oldugu icin otomatik atlanir, FreeLLMAPI tek aktif saglayici olur).
+FREELLMAPI_API_KEY = os.environ.get("FREELLMAPI_API_KEY", "").strip()
+FREELLMAPI_BASE_URL = os.environ.get("FREELLMAPI_BASE_URL", "http://localhost:3001/v1").strip()
+
 # SIRALAMA ONEMLI: Groq ve OpenRouter ONCE denenir, OmniRoute EN SONA alindi.
 # Olcumle dogrulandi: OmniRoute'un sikistirma ("compression") katmani, uzunca
 # promptlarda (orn. birlesik ozet+analiz+bolum+oneri uretimi) bazen TAMAMEN
@@ -135,6 +147,8 @@ TEXT_PROVIDERS = [
     {"name": "groq", "api_key": GROQ_API_KEY, "base_url": GROQ_BASE_URL, "models": GROQ_CHAT_MODELS},
     {"name": "openrouter", "api_key": OPENROUTER_API_KEY, "base_url": OPENROUTER_BASE_URL, "models": [OPENROUTER_CHAT_MODEL]},
     {"name": "omniroute", "api_key": OMNIROUTE_API_KEY, "base_url": OMNIROUTE_BASE_URL, "models": [OMNIROUTE_CHAT_MODEL]},
+    # Sadece FREELLMAPI_API_KEY .env'de tanimliysa devreye girer (yukaridaki not).
+    {"name": "freellmapi", "api_key": FREELLMAPI_API_KEY, "base_url": FREELLMAPI_BASE_URL, "models": ["auto"]},
 ]
 
 YTDLP_CMD = ["yt-dlp"]
