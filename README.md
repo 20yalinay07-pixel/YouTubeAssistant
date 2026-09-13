@@ -46,7 +46,7 @@ Transcript extraction itself went through its own round of fixes: an outdated AP
 
 ## Setup
 
-**0) Add your API keys.** This repo does not include a `.env` file (it's in `.gitignore`, for your own safety). Create one in the project root with your own keys:
+**0) Add your API keys.** This repo does not include a `.env` file (it's in `.gitignore`, for safety reasons). Create one in the project root with your own keys:
 
 ```
 GROQ_API_KEY=...
