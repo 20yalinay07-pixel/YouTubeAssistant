@@ -124,6 +124,57 @@ A gold **⭐ Extra Features** button at the bottom of the main menu toggles two 
 
 *A note on "Premium":* since this is a personal local tool, there's no real payment system, account, or license server behind these — building one would need its own backend, payment processing, and auth, which isn't practical here. "Premium" is just a conceptual label; you flip these on and off yourself, there's no actual lock.
 
+## Premium: selling Ad-Skip and Unlimited Chat
+
+The ⭐ Extra Features (unlimited chat, auto ad-skip) can be sold as real paid subscriptions. This is a genuinely separate system from the local backend above — it needs to be reachable from the internet 24/7, since it answers "is this license key currently active" for every buyer, not just you.
+
+**Architecture:**
+
+```
+Buyer's browser --checkout--> Lemon Squeezy --webhook--> licensing_server (Render)
+                                                                |
+Extension -------- POST /api/license/verify -------------------+
+                                                                |
+You -------------- /admin (password-protected) -----------------
+```
+
+- `licensing_server/` is a standalone Flask app (own `requirements.txt`) — deploy it separately from `backend/`.
+- It never touches raw card numbers. Checkout happens entirely on Lemon Squeezy's own hosted page; card data never reaches your code.
+- **You** control the actual payout bank account/card in Lemon Squeezy's own dashboard (Settings → Payouts) — this is not something the app builds a custom screen for, since Lemon Squeezy already handles it securely as your merchant of record.
+
+**1) Create your Lemon Squeezy products.** In your [Lemon Squeezy](https://www.lemonsqueezy.com/) dashboard, create a store, then 3 subscription products/variants:
+
+| Product | Price |
+|---|---|
+| Bundle (unlimited chat + ad skip) | $40/month |
+| Unlimited Chat only | $30/month |
+| Ad Skip only | $15/month |
+
+For each, open the product → copy its **checkout URL**.
+
+**2) Deploy `licensing_server/` to Render** (or any host that runs Flask):
+
+- New Web Service → connect this repo → root directory `licensing_server` → build command `pip install -r requirements.txt` → start command `gunicorn app:app`.
+- Set these environment variables in Render's dashboard (not a committed file):
+  - `ADMIN_PASSWORD` — your own password for `/admin`.
+  - `FLASK_SECRET_KEY` — any long random string.
+  - `LEMONSQUEEZY_WEBHOOK_SECRET` — set after step 3.
+  - `LS_CHECKOUT_URL_BUNDLE`, `LS_CHECKOUT_URL_CHAT`, `LS_CHECKOUT_URL_ADSKIP` — the checkout URLs from step 1.
+  - `DATABASE_URL` — a Postgres connection string (e.g. from [Neon](https://neon.tech) or [Supabase](https://supabase.com)'s free tier — Render's own free web services don't keep a persistent disk, so SQLite would reset on every restart).
+
+**3) Point Lemon Squeezy's webhook at your new URL.** In Lemon Squeezy: Settings → Webhooks → add `https://your-app.onrender.com/webhook/lemonsqueezy`, subscribe to `subscription_created`, `subscription_updated`, `subscription_cancelled`, `subscription_expired`, `subscription_resumed`. Copy its **Signing secret** into `LEMONSQUEEZY_WEBHOOK_SECRET` on Render.
+
+**4) Set the checkout success URL.** In each Lemon Squeezy product's checkout settings, set the redirect URL to `https://your-app.onrender.com/success?email={{ checkout.email }}` — this is the page that shows the buyer their license key right after payment.
+
+**5) Point the extension at your deployed server.** In `content.js`, update these two constants near the top of the Extra Features section:
+
+```js
+const LICENSE_SERVER_URL = 'https://your-app.onrender.com';
+const LICENSE_MARKETING_URL = 'https://your-app.onrender.com';
+```
+
+That's it — buyers land on `/`, subscribe, get a license key on `/success`, paste it into the ⭐ Extra Features panel, and the extension calls `/api/license/verify` to unlock exactly what they paid for. You manage everyone from `/admin` — see subscribers, MRR, and manually grant or revoke access.
+
 ## Project layout
 
 ```

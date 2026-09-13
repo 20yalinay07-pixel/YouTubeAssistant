@@ -117,7 +117,12 @@ const UI_STRINGS = {
         prepareStatus_failed: 'Transkript bulunamadı...',
         recNoVideo: 'Bu konu için gerçek video bulunamadı.', recWatchOnYoutube: "▶ YouTube'da aç",
         recFoundVideo: 'Bulunan video:', recEmbedError: 'Video oynatılamadı, YouTube\'da izleyin:',
-        extraTitle: '⭐ Ekstra Özellikler', extraSubtitle: 'Premium — açma/kapama sizin elinizde, tercihler tarayıcınızda saklanır.',
+        extraTitle: '⭐ Ekstra Özellikler', extraSubtitle: 'Bir lisans anahtarınız varsa aşağıya girin — plana göre özellikler otomatik açılır.',
+        extraLicenseLabel: 'Lisans anahtarı', extraLicensePlaceholder: 'YTAS-XXXX-XXXX-XXXX',
+        extraLicenseActivate: 'Etkinleştir', extraLicenseChecking: 'Kontrol ediliyor...',
+        extraLicenseValid: (plan) => `✅ Aktif: ${plan}`, extraLicenseInvalid: '❌ Geçersiz veya süresi dolmuş anahtar',
+        extraLicenseNone: 'Henüz bir lisansınız yok.', extraLicenseNetworkError: '⚠️ Sunucuya ulaşılamadı, son bilinen durum korunuyor.',
+        extraBuyLink: '💳 Premium satın al →',
         extraUnlimitedChatTitle: '💬 Yapay Zeka ile Sınırsız Chat',
         extraUnlimitedChatDesc: (n) => `🧠 Özet, 📊 Analiz, 📑 Bölümler ve 💡 Öneriler altındaki sohbet kutuları normalde video başına ${n} mesajla sınırlıdır. Bunu açtığınızda o sohbet kutularının HEPSİNDE mesaj sınırı kalkar, istediğiniz kadar sorabilirsiniz.`,
         extraAdSkipTitle: '⏩ Reklamları Otomatik Geçme',
@@ -154,7 +159,12 @@ const UI_STRINGS = {
         prepareStatus_failed: 'No transcript found...',
         recNoVideo: 'No real video found for this topic.', recWatchOnYoutube: '▶ Open on YouTube',
         recFoundVideo: 'Found video:', recEmbedError: "Video couldn't play, watch on YouTube:",
-        extraTitle: '⭐ Extra Features', extraSubtitle: 'Premium — you control on/off, preferences saved in your browser.',
+        extraTitle: '⭐ Extra Features', extraSubtitle: 'If you have a license key, enter it below — features unlock automatically based on your plan.',
+        extraLicenseLabel: 'License key', extraLicensePlaceholder: 'YTAS-XXXX-XXXX-XXXX',
+        extraLicenseActivate: 'Activate', extraLicenseChecking: 'Checking...',
+        extraLicenseValid: (plan) => `✅ Active: ${plan}`, extraLicenseInvalid: '❌ Invalid or expired key',
+        extraLicenseNone: "You don't have a license yet.", extraLicenseNetworkError: '⚠️ Could not reach the server, keeping last known status.',
+        extraBuyLink: '💳 Buy Premium →',
         extraUnlimitedChatTitle: '💬 AI Unlimited Chat',
         extraUnlimitedChatDesc: (n) => `Chat boxes under 🧠 Summary, 📊 Analysis, 📑 Chapters and 💡 Recommendations are normally limited to ${n} messages per video. Enabling this removes the limit on ALL of them.`,
         extraAdSkipTitle: '⏩ Auto-Skip Ads',
@@ -1231,10 +1241,20 @@ async function fetchTabData(action, refine) {
 
 const FREE_CHAT_LIMIT_DISPLAY = 3; // backend'deki FREE_CHAT_MESSAGE_LIMIT ile aynı olmalı (sadece gösterim için)
 
+// GERÇEK lisans doğrulaması: bağımsız, herkese açık barındırılan bir servise
+// (licensing_server/) sorulur -- bkz. README "Premium / Licensing" bölümü.
+// Deploy ettikten sonra bu adresi GERÇEK Render/hosting URL'inizle değiştirin.
+const LICENSE_SERVER_URL = 'https://YOUR-LICENSE-SERVER.onrender.com';
+const LICENSE_MARKETING_URL = 'https://YOUR-LICENSE-SERVER.onrender.com'; // pazarlama/fiyatlandırma sayfanız
+
 const PREMIUM_KEYS = {
     unlimitedChat: 'ytai_premium_unlimited_chat_enabled',
     adSkip: 'ytai_premium_adskip_enabled',
 };
+const LICENSE_KEY_STORAGE = 'ytai_license_key';
+const LICENSE_PLAN_STORAGE = 'ytai_license_plan';
+const LICENSE_LAST_CHECK_STORAGE = 'ytai_license_last_check';
+const LICENSE_RECHECK_INTERVAL_MS = 12 * 60 * 60 * 1000; // 12 saatte bir sunucudan yeniden doğrula
 
 function getPremiumState(key) {
     try { return localStorage.getItem(key) === '1'; } catch (e) { return false; }
@@ -1242,26 +1262,68 @@ function getPremiumState(key) {
 function setPremiumState(key, value) {
     try { localStorage.setItem(key, value ? '1' : '0'); } catch (e) { /* yoksay */ }
 }
+function getStoredLicenseKey() {
+    try { return localStorage.getItem(LICENSE_KEY_STORAGE) || ''; } catch (e) { return ''; }
+}
+
+// Lisans anahtarını sunucuya sorar, sonucu localStorage'a yazar (getPremiumState
+// hâlâ AYNI PREMIUM_KEYS'i okur -- bu yüzden chat/ad-skip'i kullanan mevcut kod
+// hiç değişmeden çalışmaya devam eder, tek fark artık DEĞERİ elle değil bu
+// fonksiyon belirliyor). Ağ hatasında son bilinen durumu KORUR, kullanıcıyı
+// geçici bir bağlantı sorununda cezalandırmaz.
+async function verifyLicenseKey(key) {
+    if (!key) {
+        setPremiumState(PREMIUM_KEYS.unlimitedChat, false);
+        setPremiumState(PREMIUM_KEYS.adSkip, false);
+        localStorage.removeItem(LICENSE_PLAN_STORAGE);
+        return { valid: false };
+    }
+    try {
+        const res = await fetch(`${LICENSE_SERVER_URL}/api/license/verify`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ license_key: key }),
+        });
+        const data = await res.json();
+        setPremiumState(PREMIUM_KEYS.unlimitedChat, !!(data.features && data.features.unlimited_chat));
+        setPremiumState(PREMIUM_KEYS.adSkip, !!(data.features && data.features.ad_skip));
+        localStorage.setItem(LICENSE_PLAN_STORAGE, data.plan || '');
+        localStorage.setItem(LICENSE_LAST_CHECK_STORAGE, String(Date.now()));
+        return data;
+    } catch (e) {
+        console.warn('Lisans sunucusuna ulaşılamadı, son bilinen durum korunuyor:', e);
+        return { valid: null, networkError: true };
+    }
+}
 
 function buildExtraTabPanelHTML() {
     const chatOn = getPremiumState(PREMIUM_KEYS.unlimitedChat);
     const adSkipOn = getPremiumState(PREMIUM_KEYS.adSkip);
+    const storedKey = getStoredLicenseKey();
+    const storedPlan = (() => { try { return localStorage.getItem(LICENSE_PLAN_STORAGE) || ''; } catch (e) { return ''; } })();
 
     return `
         <div style="display:flex; justify-content:space-between; align-items:center; margin:0 0 4px 0;">
             <h4 id="extra-title" style="color:#ffd200; margin:0; font-size:15px;">${ui('extraTitle')}</h4>
             <button id="close-settings" style="background:none; border:none; color:#ccc; font-size:20px; cursor:pointer; padding:0; width:24px; height:24px;">×</button>
         </div>
-        <p id="extra-subtitle" style="color:#999; font-size:11px; margin:0 0 14px 0;">${ui('extraSubtitle')}</p>
+        <p id="extra-subtitle" style="color:#999; font-size:11px; margin:0 0 12px 0;">${ui('extraSubtitle')}</p>
+
+        <div style="background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:10px; padding:12px; margin-bottom:14px;">
+            <label style="color:#bbb; font-size:11px; display:block; margin-bottom:6px;">${ui('extraLicenseLabel')}</label>
+            <div style="display:flex; gap:6px;">
+                <input id="license-key-input" type="text" value="${storedKey}" placeholder="${ui('extraLicensePlaceholder')}"
+                    style="flex:1; min-width:0; padding:8px 10px; border-radius:8px; border:1px solid rgba(255,255,255,0.2); background:rgba(255,255,255,0.05); color:white; font-size:12px; font-family:ui-monospace,monospace; outline:none;">
+                <button id="license-activate-btn" style="padding:8px 14px; border:none; border-radius:8px; background:linear-gradient(135deg,#ffd200,#ff9d00); color:#1a1a1a; font-weight:700; font-size:12px; cursor:pointer; flex-shrink:0;">${ui('extraLicenseActivate')}</button>
+            </div>
+            <p id="license-status" style="color:${storedKey ? (chatOn || adSkipOn ? '#4fd6a3' : '#ff5d5d') : '#999'}; font-size:11px; margin:8px 0 0;">${storedKey ? (chatOn || adSkipOn ? ui('extraLicenseValid', storedPlan) : ui('extraLicenseInvalid')) : ui('extraLicenseNone')}</p>
+            <a id="license-buy-link" href="${LICENSE_MARKETING_URL}" target="_blank" rel="noopener" style="display:inline-block; margin-top:8px; color:#ffd200; font-size:11px; text-decoration:none;">${ui('extraBuyLink')}</a>
+        </div>
 
         <div style="background:rgba(255,210,0,0.08); border:1px solid rgba(255,210,0,0.25); border-radius:10px; padding:12px; margin-bottom:12px;">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
                 <p id="extra-chat-title" style="color:white; font-weight:600; font-size:13px; margin:0;">${ui('extraUnlimitedChatTitle')}</p>
-                <label style="position:relative; display:inline-block; width:38px; height:20px; flex-shrink:0;">
-                    <input type="checkbox" id="toggle-unlimited-chat" ${chatOn ? 'checked' : ''} style="opacity:0; width:0; height:0;">
-                    <span id="toggle-unlimited-chat-track" style="position:absolute; cursor:pointer; inset:0; background:${chatOn ? '#ffd200' : 'rgba(255,255,255,0.2)'}; border-radius:20px; transition:.2s;"></span>
-                    <span id="toggle-unlimited-chat-dot" style="position:absolute; height:16px; width:16px; left:${chatOn ? '20px' : '2px'}; top:2px; background:white; border-radius:50%; transition:.2s; pointer-events:none;"></span>
-                </label>
+                <span style="font-size:11px; font-weight:700; color:${chatOn ? '#4fd6a3' : '#666'};">${chatOn ? '✓' : '—'}</span>
             </div>
             <p id="extra-chat-desc" style="color:#bbb; font-size:11px; margin:0;">${ui('extraUnlimitedChatDesc', FREE_CHAT_LIMIT_DISPLAY)}</p>
         </div>
@@ -1269,46 +1331,85 @@ function buildExtraTabPanelHTML() {
         <div style="background:rgba(255,210,0,0.08); border:1px solid rgba(255,210,0,0.25); border-radius:10px; padding:12px;">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
                 <p id="extra-ad-title" style="color:white; font-weight:600; font-size:13px; margin:0;">${ui('extraAdSkipTitle')}</p>
-                <label style="position:relative; display:inline-block; width:38px; height:20px; flex-shrink:0;">
-                    <input type="checkbox" id="toggle-ad-skip" ${adSkipOn ? 'checked' : ''} style="opacity:0; width:0; height:0;">
-                    <span id="toggle-ad-skip-track" style="position:absolute; cursor:pointer; inset:0; background:${adSkipOn ? '#ffd200' : 'rgba(255,255,255,0.2)'}; border-radius:20px; transition:.2s;"></span>
-                    <span id="toggle-ad-skip-dot" style="position:absolute; height:16px; width:16px; left:${adSkipOn ? '20px' : '2px'}; top:2px; background:white; border-radius:50%; transition:.2s; pointer-events:none;"></span>
-                </label>
+                <span style="font-size:11px; font-weight:700; color:${adSkipOn ? '#4fd6a3' : '#666'};">${adSkipOn ? '✓' : '—'}</span>
             </div>
             <p id="extra-ad-desc" style="color:#bbb; font-size:11px; margin:0;">${ui('extraAdSkipDesc')}</p>
         </div>
     `;
 }
 
+function refreshExtraTabFeatureBadges() {
+    const chatOn = getPremiumState(PREMIUM_KEYS.unlimitedChat);
+    const adSkipOn = getPremiumState(PREMIUM_KEYS.adSkip);
+    TAB_ACTIONS.forEach(action => {
+        const badge = document.getElementById(`chat-limit-badge-${action}`);
+        if (!badge) return;
+        if (chatOn) {
+            badge.textContent = ui('chatUnlimited');
+            badge.style.color = '#ffd200';
+        } else {
+            badge.textContent = ui('chatLimitUsed', 0, FREE_CHAT_LIMIT_DISPLAY, FREE_CHAT_LIMIT_DISPLAY);
+            badge.style.color = '#999';
+        }
+    });
+    if (adSkipOn) startAdAutoSkip(); else stopAdAutoSkip();
+}
+
 function wireExtraTabEvents() {
     document.getElementById('close-settings').onclick = () => toggleSettingsOverlay();
 
-    const chatToggle = document.getElementById('toggle-unlimited-chat');
-    chatToggle.addEventListener('change', (e) => {
-        setPremiumState(PREMIUM_KEYS.unlimitedChat, e.target.checked);
-        document.getElementById('toggle-unlimited-chat-track').style.background = e.target.checked ? '#ffd200' : 'rgba(255,255,255,0.2)';
-        document.getElementById('toggle-unlimited-chat-dot').style.left = e.target.checked ? '20px' : '2px';
-        TAB_ACTIONS.forEach(action => {
-            const badge = document.getElementById(`chat-limit-badge-${action}`);
-            if (!badge) return;
-            if (e.target.checked) {
-                badge.textContent = ui('chatUnlimited');
-                badge.style.color = '#ffd200';
-            } else {
-                badge.textContent = ui('chatLimitUsed', 0, FREE_CHAT_LIMIT_DISPLAY, FREE_CHAT_LIMIT_DISPLAY);
-                badge.style.color = '#999';
-            }
-        });
-    });
+    const input = document.getElementById('license-key-input');
+    const btn = document.getElementById('license-activate-btn');
+    const status = document.getElementById('license-status');
 
-    const adToggle = document.getElementById('toggle-ad-skip');
-    adToggle.addEventListener('change', (e) => {
-        setPremiumState(PREMIUM_KEYS.adSkip, e.target.checked);
-        document.getElementById('toggle-ad-skip-track').style.background = e.target.checked ? '#ffd200' : 'rgba(255,255,255,0.2)';
-        document.getElementById('toggle-ad-skip-dot').style.left = e.target.checked ? '20px' : '2px';
-        if (e.target.checked) startAdAutoSkip(); else stopAdAutoSkip();
-    });
+    btn.onclick = async () => {
+        const key = input.value.trim().toUpperCase();
+        btn.disabled = true;
+        const prevText = btn.textContent;
+        btn.textContent = ui('extraLicenseChecking');
+        status.style.color = '#999';
+        status.textContent = ui('extraLicenseChecking');
+
+        const result = await verifyLicenseKey(key);
+        try { localStorage.setItem(LICENSE_KEY_STORAGE, key); } catch (e) { /* yoksay */ }
+
+        if (result.networkError) {
+            status.style.color = '#ff9d00';
+            status.textContent = ui('extraLicenseNetworkError');
+        } else if (result.valid) {
+            status.style.color = '#4fd6a3';
+            status.textContent = ui('extraLicenseValid', result.plan || '');
+        } else {
+            status.style.color = '#ff5d5d';
+            status.textContent = ui('extraLicenseInvalid');
+        }
+
+        btn.disabled = false;
+        btn.textContent = prevText;
+        refreshExtraTabFeatureBadges();
+        // Panel içeriğini (✓/— rozetleri) tazelemek için yeniden çiz.
+        const container = document.getElementById('settings-overlay');
+        if (container) {
+            container.innerHTML = buildExtraTabPanelHTML();
+            wireExtraTabEvents();
+        }
+    };
+
+    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') btn.click(); });
 }
+
+// Panel her açıldığında (sayfa yüklendiğinde) daha önce girilmiş bir anahtar
+// varsa, belirli aralıklarla sunucudan SESSİZCE yeniden doğrula -- böylece bir
+// abonelik iptal/süre dolumu makul bir sürede eklentiye de yansır. Ağ hatasında
+// mevcut durum korunur (kullanıcı offline'ken cezalandırılmaz).
+(function initLicenseRecheck() {
+    const key = getStoredLicenseKey();
+    if (!key) return;
+    let lastCheck = 0;
+    try { lastCheck = parseInt(localStorage.getItem(LICENSE_LAST_CHECK_STORAGE) || '0', 10); } catch (e) { /* yoksay */ }
+    if (Date.now() - lastCheck < LICENSE_RECHECK_INTERVAL_MS) return;
+    verifyLicenseKey(key).then(() => refreshExtraTabFeatureBadges());
+})();
 
 // ---- Reklamları otomatik geçme ----
 // Sadece YouTube'un KENDİ "Reklamı geç" butonuna otomatik tıklar ve reklam

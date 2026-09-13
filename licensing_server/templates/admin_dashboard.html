@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Admin — YouTube Assistant</title>
+<style>
+  :root { --bg:#0c0b16; --surface:#15142c; --border:#2c2947; --text:#f1efff; --dim:#b3aed1; --accent:#8b9bff; --good:#4fd6a3; --bad:#ff5d5d; }
+  body { background:var(--bg); color:var(--text); font-family:system-ui,sans-serif; margin:0; padding:32px; }
+  .top { display:flex; justify-content:space-between; align-items:center; margin-bottom:28px; }
+  h1 { font-size:20px; margin:0; }
+  a.logout { color:var(--dim); font-size:13px; text-decoration:none; }
+  .stats { display:grid; grid-template-columns:repeat(4,1fr); gap:16px; margin-bottom:28px; }
+  .stat { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:16px; }
+  .stat b { display:block; font-size:24px; }
+  .stat span { font-size:12px; color:var(--dim); }
+  table { width:100%; border-collapse:collapse; background:var(--surface); border:1px solid var(--border); border-radius:12px; overflow:hidden; }
+  th, td { padding:10px 14px; text-align:left; font-size:13px; border-bottom:1px solid var(--border); }
+  th { color:var(--dim); font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.04em; }
+  .pill { display:inline-block; padding:2px 9px; border-radius:100px; font-size:11px; font-weight:600; }
+  .pill.active { background:rgba(79,214,163,.15); color:var(--good); }
+  .pill.other { background:rgba(255,93,93,.15); color:var(--bad); }
+  code { font-family:ui-monospace,monospace; background:#1c1a2e; padding:2px 6px; border-radius:5px; }
+  button { padding:5px 10px; border-radius:6px; border:1px solid var(--border); background:#1c1a2e; color:var(--text); font-size:12px; cursor:pointer; }
+  .overflow { overflow-x:auto; }
+</style>
+</head>
+<body>
+  <div class="top">
+    <h1>YouTube Assistant — Admin</h1>
+    <a class="logout" href="{{ url_for('admin_logout') }}">Log out</a>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><b>{{ stats.total }}</b><span>Total licenses</span></div>
+    <div class="stat"><b>{{ stats.active }}</b><span>Active subscribers</span></div>
+    <div class="stat"><b>${{ stats.mrr_usd }}</b><span>Estimated MRR</span></div>
+    <div class="stat"><b>{{ stats.by_plan.bundle }} / {{ stats.by_plan.chat }} / {{ stats.by_plan.adskip }}</b><span>Bundle / Chat / Ad-skip</span></div>
+  </div>
+
+  <div class="overflow">
+  <table>
+    <thead>
+      <tr><th>Email</th><th>License key</th><th>Plan</th><th>Status</th><th>Renews</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for l in licenses %}
+      <tr>
+        <td>{{ l.email }}</td>
+        <td><code>{{ l.license_key }}</code></td>
+        <td>{{ plans.get(l.plan, {}).get('label', l.plan) }}</td>
+        <td><span class="pill {{ 'active' if l.status == 'active' else 'other' }}">{{ l.status }}</span></td>
+        <td>{{ l.renews_at.strftime('%Y-%m-%d') if l.renews_at else '—' }}</td>
+        <td>
+          <form method="post" action="{{ url_for('admin_toggle_license', license_id=l.id) }}" style="margin:0;">
+            <button type="submit">{{ 'Revoke' if l.status == 'active' else 'Reactivate' }}</button>
+          </form>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" style="color:var(--dim);">No subscribers yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</body>
+</html>
