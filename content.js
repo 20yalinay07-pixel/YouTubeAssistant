@@ -1241,11 +1241,29 @@ async function fetchTabData(action, refine) {
 
 const FREE_CHAT_LIMIT_DISPLAY = 3; // backend'deki FREE_CHAT_MESSAGE_LIMIT ile aynı olmalı (sadece gösterim için)
 
-// GERÇEK lisans doğrulaması: bağımsız, herkese açık barındırılan bir servise
-// (licensing_server/) sorulur -- bkz. README "Premium / Licensing" bölümü.
-// Deploy ettikten sonra bu adresi GERÇEK Render/hosting URL'inizle değiştirin.
-const LICENSE_SERVER_URL = 'https://YOUR-LICENSE-SERVER.onrender.com';
-const LICENSE_MARKETING_URL = 'https://YOUR-LICENSE-SERVER.onrender.com'; // pazarlama/fiyatlandırma sayfanız
+// GERÇEK lisans doğrulaması: kendi sunucumuz YOK -- doğrudan Lemon Squeezy'nin
+// kendi "License API"sine soruyoruz (kendi anahtar üretimlerini/saklamalarını
+// KULLANIYORUZ, kendi webhook+veritabanımızı KURMUYORUZ). Bu, tek bir yerde
+// tek bir "gerçek" lisans kaynağı olmasını garanti eder -- iki ayrı sistem
+// (bizim + Lemon Squeezy'nin) birbirinden habersiz farklı anahtarlar üretip
+// kafa karıştırmasın diye BİLEREK bu şekilde kuruldu.
+const LICENSE_MARKETING_URL = 'https://digitalhelperforall.lemonsqueezy.com';
+const LS_LICENSE_API_BASE = 'https://api.lemonsqueezy.com/v1/licenses';
+
+// Lemon Squeezy'de 3 urunu (Bundle/Unlimited Chat/Ad Skip) olusturduktan
+// sonra HER BIRININ variant ID'sini buraya yazin -- urun sayfasinin
+// URL'sinde veya Lemon Squeezy API'sinde gorunur (sayisal bir ID, orn. 123456).
+// Doldurulmadan gercek anahtarlarin hangi ozelligi actigi BILINEMEZ (en genis
+// pakete dusulur, magdur etmemek icin).
+const LS_VARIANT_TO_PLAN = {
+    // 123456: 'bundle',
+    // 123457: 'chat',
+    // 123458: 'adskip',
+};
+
+function planFromLemonSqueezyVariant(variantId) {
+    return LS_VARIANT_TO_PLAN[variantId] || 'bundle';
+}
 
 const PREMIUM_KEYS = {
     unlimitedChat: 'ytai_premium_unlimited_chat_enabled',
@@ -1254,7 +1272,15 @@ const PREMIUM_KEYS = {
 const LICENSE_KEY_STORAGE = 'ytai_license_key';
 const LICENSE_PLAN_STORAGE = 'ytai_license_plan';
 const LICENSE_LAST_CHECK_STORAGE = 'ytai_license_last_check';
-const LICENSE_RECHECK_INTERVAL_MS = 12 * 60 * 60 * 1000; // 12 saatte bir sunucudan yeniden doğrula
+// Lemon Squeezy'nin "activate" cagrisi bir "instance" olusturur ve bir ID doner --
+// bu ID'yi saklayip sonraki dogrulamalarda kullanmazsak, her sayfa yenilemede
+// yeniden activate cagirmak zorunda kalirdik (activation_limit'e carpabilir).
+const LICENSE_INSTANCE_ID_STORAGE = 'ytai_license_instance_id';
+const LICENSE_RECHECK_INTERVAL_MS = 12 * 60 * 60 * 1000; // 12 saatte bir Lemon Squeezy'den yeniden doğrula
+
+function getStoredInstanceId() {
+    try { return localStorage.getItem(LICENSE_INSTANCE_ID_STORAGE) || ''; } catch (e) { return ''; }
+}
 
 function getPremiumState(key) {
     try { return localStorage.getItem(key) === '1'; } catch (e) { return false; }
@@ -1266,32 +1292,69 @@ function getStoredLicenseKey() {
     try { return localStorage.getItem(LICENSE_KEY_STORAGE) || ''; } catch (e) { return ''; }
 }
 
-// Lisans anahtarını sunucuya sorar, sonucu localStorage'a yazar (getPremiumState
-// hâlâ AYNI PREMIUM_KEYS'i okur -- bu yüzden chat/ad-skip'i kullanan mevcut kod
-// hiç değişmeden çalışmaya devam eder, tek fark artık DEĞERİ elle değil bu
-// fonksiyon belirliyor). Ağ hatasında son bilinen durumu KORUR, kullanıcıyı
-// geçici bir bağlantı sorununda cezalandırmaz.
+// Lemon Squeezy License API'sinin GEREKSINIMLERI (kendi belgelerinden):
+// - Content-Type: application/x-www-form-urlencoded (JSON DEGIL)
+// - Accept: application/json
+// - Anahtar durumu: "inactive" (hic aktivasyonu yok) | "active" (>=1 aktivasyon
+//   var) | "expired" | "disabled". YENI SATIN ALINAN bir anahtar BASLANGICTA
+//   "inactive" -- SADECE validate cagirmak yetmez, "active" olmasi icin ONCE
+//   activate cagrilmasi SART.
+async function callLemonSqueezyLicenseAPI(endpoint, params) {
+    const res = await fetch(`${LS_LICENSE_API_BASE}/${endpoint}`, {
+        method: 'POST',
+        headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: new URLSearchParams(params).toString(),
+    });
+    return res.json();
+}
+
+// Lisans anahtarını doğrudan Lemon Squeezy'ye sorar, sonucu localStorage'a
+// yazar (getPremiumState hâlâ AYNI PREMIUM_KEYS'i okur -- bu yüzden chat/
+// ad-skip'i kullanan mevcut kod hiç değişmeden çalışmaya devam eder). Ağ
+// hatasında son bilinen durumu KORUR, kullanıcıyı geçici bir bağlantı
+// sorununda cezalandırmaz.
 async function verifyLicenseKey(key) {
     if (!key) {
         setPremiumState(PREMIUM_KEYS.unlimitedChat, false);
         setPremiumState(PREMIUM_KEYS.adSkip, false);
         localStorage.removeItem(LICENSE_PLAN_STORAGE);
+        localStorage.removeItem(LICENSE_INSTANCE_ID_STORAGE);
         return { valid: false };
     }
     try {
-        const res = await fetch(`${LICENSE_SERVER_URL}/api/license/verify`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ license_key: key }),
-        });
-        const data = await res.json();
-        setPremiumState(PREMIUM_KEYS.unlimitedChat, !!(data.features && data.features.unlimited_chat));
-        setPremiumState(PREMIUM_KEYS.adSkip, !!(data.features && data.features.ad_skip));
-        localStorage.setItem(LICENSE_PLAN_STORAGE, data.plan || '');
+        let data;
+        const storedInstanceId = getStoredInstanceId();
+        if (storedInstanceId) {
+            // Daha once bu tarayicida aktiflestirilmis -- sadece dogrula, YENIDEN
+            // activate CAGIRMA (gereksiz bir aktivasyon daha tuketir).
+            data = await callLemonSqueezyLicenseAPI('validate', { license_key: key, instance_id: storedInstanceId });
+        } else {
+            // Ilk kez giriliyor: "inactive" -> "active" GECISI icin activate SART.
+            data = await callLemonSqueezyLicenseAPI('activate', { license_key: key, instance_name: 'YouTube Assistant Extension' });
+            if (data && data.instance && data.instance.id) {
+                localStorage.setItem(LICENSE_INSTANCE_ID_STORAGE, data.instance.id);
+            }
+        }
+
+        const status = data && data.license_key ? data.license_key.status : null;
+        const isValid = !!(data && (data.valid || data.activated)) && status === 'active';
+        const variantId = data && data.meta ? data.meta.variant_id : null;
+        const plan = isValid ? planFromLemonSqueezyVariant(variantId) : '';
+        const features = {
+            unlimited_chat: isValid && (plan === 'bundle' || plan === 'chat'),
+            ad_skip: isValid && (plan === 'bundle' || plan === 'adskip'),
+        };
+
+        setPremiumState(PREMIUM_KEYS.unlimitedChat, features.unlimited_chat);
+        setPremiumState(PREMIUM_KEYS.adSkip, features.ad_skip);
+        localStorage.setItem(LICENSE_PLAN_STORAGE, plan);
         localStorage.setItem(LICENSE_LAST_CHECK_STORAGE, String(Date.now()));
-        return data;
+        return { valid: isValid, status, plan, features, error: data && data.error };
     } catch (e) {
-        console.warn('Lisans sunucusuna ulaşılamadı, son bilinen durum korunuyor:', e);
+        console.warn('Lemon Squeezy lisans servisine ulaşılamadı, son bilinen durum korunuyor:', e);
         return { valid: null, networkError: true };
     }
 }

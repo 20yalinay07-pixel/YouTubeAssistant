@@ -126,26 +126,21 @@ Unlocking them for real (as paid subscriptions) is covered next.
 
 ## Premium: selling Ad-Skip and Unlimited Chat
 
-The ⭐ Extra Features (unlimited chat, auto ad-skip) can be sold as real paid subscriptions. This is a genuinely separate system from the local backend above — it needs to be reachable from the internet 24/7, since it answers "is this license key currently active" for every buyer, not just you.
-
-**Architecture — two separate services, one shared database:**
+The ⭐ Extra Features can be sold as real paid subscriptions — with **no backend of our own at all**. The extension talks directly to [Lemon Squeezy's License API](https://docs.lemonsqueezy.com/help/licensing/license-api), which generates, stores, and validates the license keys. This keeps there being exactly one source of truth for "is this key valid" — no separate database, no webhook server, no admin login exposed to the internet.
 
 ```
-Buyer's browser --checkout--> Lemon Squeezy --webhook--> licensing_server (Render, public)
-                                                                |
-Extension -------- POST /api/license/verify -------------------+
-                                                                |
-                                                          shared database
-                                                                |
-You (own machine) ---- licensing_admin (local only, never deployed)
+Buyer's browser --checkout--> Lemon Squeezy (hosted store + checkout)
+                                     |
+                              generates a license key
+                                     |
+Extension ---- POST api.lemonsqueezy.com/v1/licenses/activate / validate ----> unlocks features
 ```
 
-- `licensing_server/` is the **public** piece — landing page, checkout links, webhook receiver, license verification API. Deploy this to Render (or any Flask host).
-- `licensing_admin/` is the **admin dashboard** — deliberately kept out of the public repo (it's in `.gitignore`) and never deployed anywhere. You run it with `python app.py` only on your own computer, pointed at the same production database, whenever you want to check subscribers or revoke access. This means the internet-facing service has zero admin/login surface at all.
-- Neither service ever touches raw card numbers. Checkout happens entirely on Lemon Squeezy's own hosted page; card data never reaches your code.
-- **You** control the actual payout bank account/card in Lemon Squeezy's own dashboard (Settings → Payouts) — this is not something the app builds a custom screen for, since Lemon Squeezy already handles it securely as your merchant of record.
+- Card data never touches this project's code — checkout happens entirely on Lemon Squeezy's hosted page.
+- **You** control the payout bank account/card in Lemon Squeezy's own dashboard (Settings → Payouts) — not something this app builds a screen for.
+- Subscribers, revenue, and refunds are all visible in Lemon Squeezy's own dashboard — no separate admin panel to run or secure.
 
-**1) Create your Lemon Squeezy products.** In your [Lemon Squeezy](https://digitalhelperforall.lemonsqueezy.com) store, create 3 subscription products/variants:
+**1) Create your 3 products** in your [Lemon Squeezy store](https://digitalhelperforall.lemonsqueezy.com):
 
 | Product | Price |
 |---|---|
@@ -153,29 +148,21 @@ You (own machine) ---- licensing_admin (local only, never deployed)
 | Unlimited Chat only | $30/month |
 | Ad Skip only | $15/month |
 
-For each, open the product → copy its **checkout URL**.
+For each product's variant, turn on **"Generate license key"** in its settings (do *not* leave it off — the extension depends on this). Recommended: leave the activation limit high or unlimited, since one buyer may reinstall the extension or use more than one browser.
 
-**2) Deploy `licensing_server/` to Render** (or any host that runs Flask):
+**2) Get each variant's ID.** Open a product in the Lemon Squeezy dashboard — the variant ID is the numeric ID shown in the URL or in the product's API response.
 
-- New Web Service → connect this repo → root directory `licensing_server` → build command `pip install -r requirements.txt` → start command `gunicorn app:app`.
-- Set these environment variables in Render's dashboard (not a committed file):
-  - `FLASK_SECRET_KEY` — any long random string.
-  - `LEMONSQUEEZY_WEBHOOK_SECRET` — set after step 3.
-  - `LS_CHECKOUT_URL_BUNDLE`, `LS_CHECKOUT_URL_CHAT`, `LS_CHECKOUT_URL_ADSKIP` — the checkout URLs from step 1.
-  - `DATABASE_URL` — a Postgres connection string (e.g. from [Neon](https://neon.tech) or [Supabase](https://supabase.com)'s free tier — Render's own free web services don't keep a persistent disk, so SQLite would reset on every restart). **Use this exact same connection string locally for `licensing_admin/`** (its own `.env`, copied from `.env.example`) — that's what lets the local admin dashboard see the same subscribers.
-
-**3) Point Lemon Squeezy's webhook at your new URL.** In Lemon Squeezy: Settings → Webhooks → add `https://your-app.onrender.com/webhook/lemonsqueezy`, subscribe to `subscription_created`, `subscription_updated`, `subscription_cancelled`, `subscription_expired`, `subscription_resumed`. Copy its **Signing secret** into `LEMONSQUEEZY_WEBHOOK_SECRET` on Render.
-
-**4) Set the checkout success URL.** In each Lemon Squeezy product's checkout settings, set the redirect URL to `https://your-app.onrender.com/success?email={{ checkout.email }}` — this is the page that shows the buyer their license key right after payment.
-
-**5) Point the extension at your deployed server.** In `content.js`, update these two constants near the top of the Extra Features section:
+**3) Wire the variant IDs to plans.** In `content.js`, fill in the mapping near the top of the Extra Features section:
 
 ```js
-const LICENSE_SERVER_URL = 'https://your-app.onrender.com';
-const LICENSE_MARKETING_URL = 'https://your-app.onrender.com';
+const LS_VARIANT_TO_PLAN = {
+    123456: 'bundle',
+    123457: 'chat',
+    123458: 'adskip',
+};
 ```
 
-That's it — buyers land on `/`, subscribe, get a license key on `/success`, paste it into the ⭐ Extra Features panel, and the extension calls `/api/license/verify` to unlock exactly what they paid for. To check on subscribers or revoke access, run `python app.py` inside `licensing_admin/` on your own machine and open `http://127.0.0.1:5050`.
+That's it — no deployment, no database, no server to keep running. A buyer subscribes on your Lemon Squeezy store, gets their license key by email (Lemon Squeezy sends this automatically), pastes it into the ⭐ Extra Features panel, and the extension calls Lemon Squeezy directly to activate it and unlock exactly what they paid for. Every 12 hours it silently re-validates, so a cancelled subscription stops working within that window.
 
 ## Project layout
 
@@ -186,9 +173,7 @@ backend/
   ytdlp_bypass.py      yt-dlp evasion helpers
   requirements.txt
 pot_server/            Local Node.js server that defeats YouTube's 429/bot blocking
-licensing_server/      Public: landing page, Lemon Squeezy webhook, license verification API
-licensing_admin/       Local-only admin dashboard (gitignored — never deployed, never on GitHub)
-content.js              Chrome content script — the panel UI itself
+content.js              Chrome content script — the panel UI itself, including Lemon Squeezy license verification
 manifest.json           Extension manifest (Manifest V3)
 start_hidden.vbs        Launches everything with no visible window
 start_server.bat        Console-visible fallback launcher (no tray icon)

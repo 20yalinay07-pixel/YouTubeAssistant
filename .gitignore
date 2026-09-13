@@ -6,6 +6,3 @@ build/
 dist/
 __pycache__/
 *.pyc
-licensing_server/licenses.db
-licensing_server/instance/
-licensing_admin/
