@@ -1438,7 +1438,7 @@ function buildExtraTabPanelHTML() {
             <a id="license-buy-link" href="${LICENSE_MARKETING_URL}" target="_blank" rel="noopener" style="display:inline-block; margin-top:8px; color:#ffd200; font-size:11px; text-decoration:none;">${ui('extraBuyLink')}</a>
         </div>
 
-        <div style="background:rgba(255,210,0,0.08); border:1px solid rgba(255,210,0,0.25); border-radius:10px; padding:12px; margin-bottom:12px;">
+        <div style="background:${chatOn ? 'rgba(255,210,0,0.06)' : 'rgba(255,255,255,0.03)'}; border:1px solid ${chatOn ? 'rgba(255,210,0,0.18)' : 'rgba(255,255,255,0.08)'}; border-radius:10px; padding:12px; margin-bottom:12px; opacity:${chatOn ? '1' : '0.7'};">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
                 <p id="extra-chat-title" style="color:white; font-weight:600; font-size:13px; margin:0;">${ui('extraUnlimitedChatTitle')}</p>
                 <span style="font-size:11px; font-weight:700; color:${chatOn ? '#4fd6a3' : '#666'};">${chatOn ? '✓' : '—'}</span>
@@ -1446,7 +1446,7 @@ function buildExtraTabPanelHTML() {
             <p id="extra-chat-desc" style="color:#bbb; font-size:11px; margin:0;">${ui('extraUnlimitedChatDesc', FREE_CHAT_LIMIT_DISPLAY)}</p>
         </div>
 
-        <div style="background:rgba(255,210,0,0.08); border:1px solid rgba(255,210,0,0.25); border-radius:10px; padding:12px;">
+        <div style="background:${adSkipOn ? 'rgba(255,210,0,0.06)' : 'rgba(255,255,255,0.03)'}; border:1px solid ${adSkipOn ? 'rgba(255,210,0,0.18)' : 'rgba(255,255,255,0.08)'}; border-radius:10px; padding:12px; opacity:${adSkipOn ? '1' : '0.7'};">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
                 <p id="extra-ad-title" style="color:white; font-weight:600; font-size:13px; margin:0;">${ui('extraAdSkipTitle')}</p>
                 <span style="font-size:11px; font-weight:700; color:${adSkipOn ? '#4fd6a3' : '#666'};">${adSkipOn ? '✓' : '—'}</span>
