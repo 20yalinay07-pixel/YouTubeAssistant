@@ -2208,6 +2208,14 @@ def build_recommendations(video_id: str, transcript: str, extra_context: str = "
             "Bu içerik bir BİLGİLENDİRME/EĞİTİM videosu. Önerilerin de BENZER KONULU bilgilendirme/eğitim "
             "videoları olsun — şarkı/müzik/AMV/edit önerme."
         ),
+        "gameplay": (
+            "Bu içerik bir OYUN OYNANIŞI (gameplay) videosu — arka planda gerçek bir şarkı çalıyor olabilir "
+            "ve YouTube bunu bu yüzden yanlışlıkla 'Music' kategorisine koymuş olabilir, ama içerik ÖZÜNDE "
+            "bir oyunun oynanışıdır. Önerilerin de AYNI OYUNUN benzer oynanış/rehber/skor videoları olsun "
+            "(örn. aynı oyunun başka oynanış videoları, o oyuna dair rehberler, benzer skor/performans "
+            "videoları). KESİNLİKLE sadece arka planda çalan şarkıya benzer başka şarkılar ÖNERME — bu, "
+            "videonun asıl konusuyla alakasızdır."
+        ),
     }[content_type]
 
     prompt = f"""Bu video içeriğine göre 5 farklı, gerçekten YouTube'da bulunabilecek video KONUSU/başlık fikri öner.
@@ -2477,21 +2485,40 @@ FAN_EDIT_KEYWORDS = [
     "music video", "müzik videosu", "fan edit", "kurgu",
 ]
 
+# TERSİ durum: bir oyun OYNANIŞ videosu, arka planda GERÇEK bir şarkı çaldığı
+# için YouTube'un kendi sınıflandırması onu "Music" kategorisine koyabiliyor
+# (is_music=True çıkar) -- gözlemlendi: bir osu! videosunun başlığı gerçek bir
+# şarkı adı formatındaydı (YouTube bunu Music sanıp is_music=True verdi), ama
+# açıklaması açıkça "Osu! Play it..very addicting game...can u pass my
+# score?" diyordu. is_music=True kontrolü buna bakmadan HER ZAMAN "music"
+# döndürdüğü için öneriler "benzer şarkılar" moduna geçip transkriptteki şarkı
+# sözü parçalarından alakasız şarkı önerileri üretiyordu. Bu yüzden is_music
+# kontrolünden ÖNCE bu anahtar kelimeler kontrol edilir.
+GAMEPLAY_KEYWORDS = [
+    "gameplay", "playthrough", "walkthrough", "let's play", "lets play",
+    "speedrun", "no commentary", "full combo", "osu!",
+]
+
 
 def detect_content_type(meta: dict) -> str:
     """
     Anahtar kelime tabanlı basit içerik türü tahmini:
+      'gameplay' -> oyun oynanışı (arka planda gerçek bir şarkı çalıyor olabilir)
       'music'    -> gerçek bir şarkı/müzik yüklemesi (YouTube kategorisi 'Music')
       'fan_edit' -> AMV/MV/edit/tribute (müzik eşliğinde görsel kurgu)
       'info'     -> bilgilendirme/eğitim/analiz videosu
     """
-    if meta.get("is_music"):
-        return "music"
-
     title = (meta.get("title") or "").lower()
     description = (meta.get("description") or "").lower()
     tags = " ".join(meta.get("tags") or []).lower()
     combined = f" {title} {description} {tags} "
+
+    for kw in GAMEPLAY_KEYWORDS:
+        if re.search(rf"(?<![a-zçğıöşü]){re.escape(kw)}(?![a-zçğıöşü])", combined):
+            return "gameplay"
+
+    if meta.get("is_music"):
+        return "music"
 
     for kw in FAN_EDIT_KEYWORDS:
         if re.search(rf"(?<![a-zçğıöşü]){re.escape(kw)}(?![a-zçğıöşü])", combined):
@@ -2585,7 +2612,13 @@ def _extract_delimited_translation(raw: str) -> str:
     end_idx = raw.find(_TRANSLATION_END)
     if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
         return raw[start_idx + len(_TRANSLATION_START):end_idx].strip()
-    # Sinirlayicilar yoksa (model onlari da atladiysa) oldugu gibi don --
+    if start_idx != -1:
+        # Baslangic isareti var ama bitis isareti yok -- yanit max_tokens'a
+        # takilip yarida kesilmis demektir (gozlemlendi: uzun/CJK kaynakli
+        # parcalarda). Yine de EN AZINDAN isaretin kendisini kullaniciya
+        # gostermeyelim; kesik de olsa temiz metin kalsin.
+        return raw[start_idx + len(_TRANSLATION_START):].strip()
+    # Sinirlayicilar hic yoksa (model onlari da atladiysa) oldugu gibi don --
     # en azindan bos donmez, nadir durumda sizinti kalabilir ama veri kaybolmaz.
     return raw.strip()
 
@@ -2668,13 +2701,17 @@ def _translate_chunk(chunk: str, target_lang: str) -> str:
     endpoint'i (/api/transcript/translate/stream -- her parca bitince aninda
     frontend'e SSE ile akitir) BU fonksiyonu paylasir, mantik tekrari yok.
     """
-    # max_tokens=1500 (TRANSLATE_CHUNK_CHARS=2000lik bir parca icin bolca yeterli,
-    # cevrilmis metin nadiren 2500 karakteri/~800 token'i asar) KASITLI KUCUK:
+    # max_tokens=2200 (TRANSLATE_CHUNK_CHARS=2000lik bir parca icin bolca yeterli,
+    # cevrilmis metin nadiren 2500 karakteri/~800 token'i asar -- ama CJK gibi
+    # yogun/kisa-karakterli kaynak dillerden Turkce'ye cevride cikti bazen
+    # beklenenden uzun cikip eski 1500 siniri dolabiliyordu; yanit bitis
+    # isaretine ULASAMADAN kesiliyordu, bkz. _extract_delimited_translation).
     # Groq, TPM (dakika basi token) limitini GERCEK kullanima gore degil, max_tokens
-    # ile TALEP EDILEN degere gore hesapliyor -- 4000 ile her paralel istek ~4700
-    # token "rezerve ediyordu" (8000 TPM'in cogu), bu da paralel ceviri parcalarinin
-    # cogunun 429 alip yavas OpenRouter'a dusmesine yol aciyordu (olcumle gozlemlendi).
-    raw = _chat_completion(_build_translate_prompt(target_lang, False), chunk, max_tokens=1500, temperature=0.3)  # feature=None kasitli:
+    # ile TALEP EDILEN degere gore hesapliyor -- bu yuzden paralellik (asagidaki
+    # max_workers) 5'ten 3'e dusuruldu: 3*2200=6600, hala 8000 TPM'in altinda,
+    # eskisi gibi 429/yavas-yedege dusme riski yaratmadan her parcaya daha fazla
+    # tampon veriyor.
+    raw = _chat_completion(_build_translate_prompt(target_lang, False), chunk, max_tokens=2200, temperature=0.3)  # feature=None kasitli:
     # OmniRoute'un uzun/tekrarli promptlarda bozuk/alakasiz icerik dondurdugu bilinen bir sorun
     # (bkz. _chat_completion yorumu) -- ceviri tam bu senaryoya giriyor, gozlemlendi (gercekte)
     # tamamen alakasiz bir metin uretti. feature="chat" OmniRoute'u basa aldigi icin BUNU KULLANMA;
@@ -2683,7 +2720,7 @@ def _translate_chunk(chunk: str, target_lang: str) -> str:
     # Cevrilmis metin, kaynagin %45'inden kisa cikarsa muhtemelen ozetlenmis --
     # bir kez daha, daha sert bir uyariyla dene.
     if len(result) < len(chunk) * 0.45:
-        raw_retry = _chat_completion(_build_translate_prompt(target_lang, True), chunk, max_tokens=1500, temperature=0.2, skip_providers={"omniroute"})
+        raw_retry = _chat_completion(_build_translate_prompt(target_lang, True), chunk, max_tokens=2200, temperature=0.2, skip_providers={"omniroute"})
         result_retry = _extract_delimited_translation(raw_retry)
         if len(result_retry) > len(result):
             result = result_retry
@@ -2705,7 +2742,7 @@ def translate_transcript_text(text: str, target_lang: str) -> str:
     """
     chunks = _split_into_chunks(text, TRANSLATE_CHUNK_CHARS)
     results = [None] * len(chunks)
-    max_workers = min(5, len(chunks))
+    max_workers = min(3, len(chunks))  # bkz. _translate_chunk: max_tokens 2200'e cikinca TPM'i asmamak icin dusuruldu
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
         for idx, translated in executor.map(lambda ic: (ic[0], _translate_chunk(ic[1], target_lang)), enumerate(chunks)):
             results[idx] = translated
@@ -2776,7 +2813,7 @@ def api_transcript_translate_stream():
         _, transcript = result
 
         chunks = _split_into_chunks(transcript, TRANSLATE_CHUNK_CHARS)
-        max_workers = min(5, len(chunks))
+        max_workers = min(3, len(chunks))  # bkz. _translate_chunk: max_tokens 2200'e cikinca TPM'i asmamak icin dusuruldu
         results = [None] * len(chunks)
         try:
             with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
