@@ -1273,12 +1273,10 @@ const PREMIUM_KEYS = {
 };
 const LICENSE_KEY_STORAGE = 'ytai_license_key';
 const LICENSE_PLAN_STORAGE = 'ytai_license_plan';
-const LICENSE_LAST_CHECK_STORAGE = 'ytai_license_last_check';
 // Lemon Squeezy'nin "activate" cagrisi bir "instance" olusturur ve bir ID doner --
 // bu ID'yi saklayip sonraki dogrulamalarda kullanmazsak, her sayfa yenilemede
 // yeniden activate cagirmak zorunda kalirdik (activation_limit'e carpabilir).
 const LICENSE_INSTANCE_ID_STORAGE = 'ytai_license_instance_id';
-const LICENSE_RECHECK_INTERVAL_MS = 12 * 60 * 60 * 1000; // 12 saatte bir Lemon Squeezy'den yeniden doğrula
 
 // Kullanicinin kendi AI saglayici anahtarlari artik .env dosyasina degil
 // chrome.storage.sync'e yaziliyor -- Chrome hesabina baglandigi icin ayni
@@ -1337,11 +1335,27 @@ function getStoredInstanceId() {
     try { return localStorage.getItem(LICENSE_INSTANCE_ID_STORAGE) || ''; } catch (e) { return ''; }
 }
 
+// GERÇEK premium durumu artık localStorage'da TUTULMUYOR -- sadece bu içerik
+// betiğinin kendi izole JS dünyasında (LIVE_PREMIUM_STATE), SADECE gerçek bir
+// Lemon Squeezy doğrulaması SONUCUNDA yazılıyor. Sayfanın varsayılan DevTools
+// konsolu, sayfanın KENDİ (ana) JS dünyasında çalışır -- içerik betiğinin bu
+// değişkenine erişemez/göremez. Yani "localStorage.setItem(...)" ile premium'u
+// sahte açma artık İŞE YARAMAZ (hiçbir kod artık o anahtarı okumuyor).
+// NOT: DevTools'un "context" menüsünden bilerek içerik betiği dünyasına geçen
+// ya da kaynağı indirip değiştirip yeniden yükleyen ileri düzey bir kullanıcı
+// yine de aşabilir -- açık kaynaklı/istemci tarafı çalışan hiçbir kod için bu
+// tamamen engellenemez. Bu değişiklik sadece rastgele "konsola tek satır
+// yapıştır" tarzı bypass'ı kapatıyor.
+const LIVE_PREMIUM_STATE = { unlimitedChat: false, adSkip: false };
+
 function getPremiumState(key) {
-    try { return localStorage.getItem(key) === '1'; } catch (e) { return false; }
+    if (key === PREMIUM_KEYS.unlimitedChat) return LIVE_PREMIUM_STATE.unlimitedChat;
+    if (key === PREMIUM_KEYS.adSkip) return LIVE_PREMIUM_STATE.adSkip;
+    return false;
 }
 function setPremiumState(key, value) {
-    try { localStorage.setItem(key, value ? '1' : '0'); } catch (e) { /* yoksay */ }
+    if (key === PREMIUM_KEYS.unlimitedChat) LIVE_PREMIUM_STATE.unlimitedChat = !!value;
+    else if (key === PREMIUM_KEYS.adSkip) LIVE_PREMIUM_STATE.adSkip = !!value;
 }
 function getStoredLicenseKey() {
     try { return localStorage.getItem(LICENSE_KEY_STORAGE) || ''; } catch (e) { return ''; }
@@ -1406,7 +1420,6 @@ async function verifyLicenseKey(key) {
         setPremiumState(PREMIUM_KEYS.unlimitedChat, features.unlimited_chat);
         setPremiumState(PREMIUM_KEYS.adSkip, features.ad_skip);
         localStorage.setItem(LICENSE_PLAN_STORAGE, plan);
-        localStorage.setItem(LICENSE_LAST_CHECK_STORAGE, String(Date.now()));
         return { valid: isValid, status, plan, features, error: data && data.error };
     } catch (e) {
         console.warn('Lemon Squeezy lisans servisine ulaşılamadı, son bilinen durum korunuyor:', e);
@@ -1571,17 +1584,27 @@ function wireExtraTabEvents() {
     }
 }
 
-// Panel her açıldığında (sayfa yüklendiğinde) daha önce girilmiş bir anahtar
-// varsa, belirli aralıklarla sunucudan SESSİZCE yeniden doğrula -- böylece bir
-// abonelik iptal/süre dolumu makul bir sürede eklentiye de yansır. Ağ hatasında
-// mevcut durum korunur (kullanıcı offline'ken cezalandırılmaz).
+// Sayfa her yüklendiğinde (video değişimi DEĞİL -- YouTube'un SPA navigasyonu
+// aynı script örneğini korur, bkz. dosya sonundaki MutationObserver) daha önce
+// girilmiş bir anahtar varsa MUTLAKA sunucudan doğrula. ÖNEMLİ: LIVE_PREMIUM_STATE
+// artık kalıcı DEĞİL (bilerek -- konsoldan sahte açmaya karşı), yani her sayfa
+// yüklemesinde false'tan başlıyor; gerçek durumun geri gelmesi için bu kontrolün
+// HER SEFERİNDE (eski 12 saatlik eşiğe takılmadan) çalışması şart. Lemon
+// Squeezy'nin 60 istek/dk limiti için risk yok, bu sekme/sayfa başına bir kez
+// çalışıyor. Ağ hatasında sessizce false kalır (kullanıcı offline'ken tüm
+// özellikleri açık bırakmak güvenlik amacını bozar; bir sonraki sayfa
+// yüklemesinde/yeniden bağlanınca otomatik düzelir).
 (function initLicenseRecheck() {
     const key = getStoredLicenseKey();
     if (!key) return;
-    let lastCheck = 0;
-    try { lastCheck = parseInt(localStorage.getItem(LICENSE_LAST_CHECK_STORAGE) || '0', 10); } catch (e) { /* yoksay */ }
-    if (Date.now() - lastCheck < LICENSE_RECHECK_INTERVAL_MS) return;
-    verifyLicenseKey(key).then(() => refreshExtraTabFeatureBadges());
+    verifyLicenseKey(key).then(() => {
+        refreshExtraTabFeatureBadges();
+        const container = document.getElementById('settings-overlay');
+        if (container) {
+            container.innerHTML = buildExtraTabPanelHTML();
+            wireExtraTabEvents();
+        }
+    });
 })();
 
 // ---- Reklamları otomatik geçme ----
