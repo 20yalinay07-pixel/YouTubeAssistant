@@ -48,19 +48,19 @@ STANDARD_PROVIDERS = [
      "İsteğe bağlı; önerilen videoların gerçekten var olduğunu doğrular."),
 ]
 
-OMNIROUTE_DASHBOARD_URL = "http://localhost:20129"
-FREELLMAPI_DASHBOARD_URL = "http://localhost:3001"
+OMNIROUTE_REAL_URL = "https://www.omniroute.online/"
 
+# (env_key, etiket, not-veya-None -- daha once olculup dogrulanmis oneri)
 OMNIROUTE_KEYS = [
-    ("OMNIROUTE_KEY_CHAT", "Chat / genel amaçlı"),
-    ("OMNIROUTE_KEY_SUMMARIZE", "Özetleyici"),
-    ("OMNIROUTE_KEY_ANALYZE", "Transkriptor"),
-    ("OMNIROUTE_KEY_RECOMMENDATIONS", "Video önerici"),
-    ("OMNIROUTE_KEY_CHAPTERS", "Video bölümleyici"),
+    ("OMNIROUTE_KEY_CHAT", "Chat / genel amaçlı", "önerilen: Mistral → Gemini"),
+    ("OMNIROUTE_KEY_SUMMARIZE", "Özetleyici", None),
+    ("OMNIROUTE_KEY_ANALYZE", "Transkriptor", "önerilen: Deepgram nova-2"),
+    ("OMNIROUTE_KEY_RECOMMENDATIONS", "Video önerici", None),
+    ("OMNIROUTE_KEY_CHAPTERS", "Video bölümleyici", None),
 ]
 
 ALL_ENV_KEYS = (
-    [QUICK_PROVIDER[0]] + [p[0] for p in STANDARD_PROVIDERS] + [k for k, _ in OMNIROUTE_KEYS]
+    [QUICK_PROVIDER[0]] + [p[0] for p in STANDARD_PROVIDERS] + [k for k, _, _ in OMNIROUTE_KEYS]
 )
 
 
@@ -277,10 +277,7 @@ class SetupWizard(tk.Tk):
         canvas.bind_all("<MouseWheel>", lambda e: canvas.yview_scroll(int(-e.delta / 120), "units"))
 
         self._section_title(self.scroll_frame, "Hızlı yol")
-        self._provider_row(
-            self.scroll_frame, *QUICK_PROVIDER,
-            dashboard_url=FREELLMAPI_DASHBOARD_URL, dashboard_label="↳ Panele git (kurulumdan sonra)",
-        )
+        self._provider_row(self.scroll_frame, *QUICK_PROVIDER)
 
         self._section_title(self.scroll_frame, "Ayrı ayrı sağlayıcılar (isteğe bağlı, tek tek eklenebilir)")
         for env_key, label, url, help_text in STANDARD_PROVIDERS:
@@ -290,12 +287,14 @@ class SetupWizard(tk.Tk):
         ttk.Label(
             self.scroll_frame,
             text="OmniRoute'u kurmadıysanız bu bölümü tamamen boş bırakabilirsiniz -- otomatik atlanır. "
-                 "Anahtarları OmniRoute'un kendi panelinden alın (aşağıdaki \"Panele git\" düğmesi, backend "
-                 "çalışırken açar).",
+                 "Anahtarları OmniRoute'un kendi paneli üzerinden oluşturun (aşağıdaki \"Siteye git\" düğmesi).",
             foreground="#666", wraplength=610, justify="left",
         ).pack(anchor="w", padx=4, pady=(0, 6))
-        for env_key, label in OMNIROUTE_KEYS:
-            self._simple_row(self.scroll_frame, env_key, label, dashboard_url=OMNIROUTE_DASHBOARD_URL)
+        for env_key, label, note in OMNIROUTE_KEYS:
+            self._simple_row(
+                self.scroll_frame, env_key, label, note=note,
+                dashboard_url=OMNIROUTE_REAL_URL, dashboard_label="Siteye git",
+            )
 
         self.install_omniroute = tk.BooleanVar(value=False)
         ttk.Checkbutton(
@@ -354,12 +353,15 @@ class SetupWizard(tk.Tk):
                 command=lambda u=dashboard_url: webbrowser.open(u),
             ).pack(anchor="w", padx=(4, 0), pady=(4, 0))
 
-    def _simple_row(self, parent, env_key, label, dashboard_url=None, dashboard_label="Panele git"):
+    def _simple_row(self, parent, env_key, label, note=None, dashboard_url=None, dashboard_label="Panele git"):
         frame = ttk.Frame(parent, padding=(4, 2))
         frame.pack(fill="x")
         top = ttk.Frame(frame)
         top.pack(fill="x")
-        ttk.Label(top, text=label, width=34).pack(side="left")
+        ttk.Label(top, text=label, width=22).pack(side="left")
+        ttk.Label(top, text=f"({note})" if note else "", foreground="#999", width=26).pack(
+            side="left", padx=(0, 4)
+        )
         entry = ttk.Entry(top, show="*")
         entry.insert(0, self.existing.get(env_key, ""))
         entry.pack(side="left", fill="x", expand=True, padx=6)
