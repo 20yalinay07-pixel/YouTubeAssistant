@@ -151,6 +151,75 @@ TEXT_PROVIDERS = [
     {"name": "freellmapi", "api_key": FREELLMAPI_API_KEY, "base_url": FREELLMAPI_BASE_URL, "models": ["auto"]},
 ]
 
+
+def _apply_key_overrides(overrides: dict) -> None:
+    """Uzantidan (chrome.storage.sync -- kullanicinin hesabina bagli, tum
+    cihazlarinda otomatik senkronize) HER istekle birlikte gelen anahtarlarla
+    bu SURECIN calisma-zamani ayarlarini gunceller. Bu backend tek bir
+    kullanici icin YEREL calistigi icin (coklu-kullanici sunucu DEGIL), surec
+    genelinde global degiskenleri guncellemek guvenli ve yeterlidir -- istek
+    bazinda izole bir mekanizmaya (thread-local/contextvar) gerek yok, cunku
+    zaten ayni anda tek bir kullanicinin anahtarlari gecerli oluyor.
+    Bos/eksik alanlar yoksayilir -- uzanti henuz o anahtari hic girmemisse
+    .env'den yuklenen deger (varsa) calismaya devam eder, boylece eski .env
+    tabanli akis da geriye donuk uyumlu kalir."""
+    global GROQ_API_KEY, OPENROUTER_API_KEY, OMNIROUTE_API_KEY
+    global ASSEMBLYAI_API_KEY_SUMMARIZE, ASSEMBLYAI_API_KEY_CHAPTERS, EXA_SEARCH_API_KEY
+    global FREELLMAPI_API_KEY, TEXT_PROVIDERS
+
+    if not isinstance(overrides, dict) or not overrides:
+        return
+
+    def _clean(v):
+        return v.strip() if isinstance(v, str) else ""
+
+    text_provider_key_changed = False
+    if _clean(overrides.get("GROQ_API_KEY")):
+        GROQ_API_KEY = _clean(overrides["GROQ_API_KEY"])
+        text_provider_key_changed = True
+    if _clean(overrides.get("OPENROUTER_API_KEY")):
+        OPENROUTER_API_KEY = _clean(overrides["OPENROUTER_API_KEY"])
+        text_provider_key_changed = True
+    if _clean(overrides.get("FREELLMAPI_API_KEY")):
+        FREELLMAPI_API_KEY = _clean(overrides["FREELLMAPI_API_KEY"])
+        text_provider_key_changed = True
+    if _clean(overrides.get("EXA_SEARCH_API_KEY")):
+        EXA_SEARCH_API_KEY = _clean(overrides["EXA_SEARCH_API_KEY"])
+    if _clean(overrides.get("ASSEMBLYAI_API_KEY_SUMMARIZE")):
+        ASSEMBLYAI_API_KEY_SUMMARIZE = _clean(overrides["ASSEMBLYAI_API_KEY_SUMMARIZE"])
+    if _clean(overrides.get("ASSEMBLYAI_API_KEY_CHAPTERS")):
+        ASSEMBLYAI_API_KEY_CHAPTERS = _clean(overrides["ASSEMBLYAI_API_KEY_CHAPTERS"])
+
+    for feature_key, env_name in (
+        ("chat", "OMNIROUTE_KEY_CHAT"), ("summarize", "OMNIROUTE_KEY_SUMMARIZE"),
+        ("analyze", "OMNIROUTE_KEY_ANALYZE"), ("recommendations", "OMNIROUTE_KEY_RECOMMENDATIONS"),
+        ("chapters", "OMNIROUTE_KEY_CHAPTERS"),
+    ):
+        val = _clean(overrides.get(env_name))
+        if val:
+            OMNIROUTE_FEATURE_KEYS[feature_key] = val
+            text_provider_key_changed = True
+
+    if text_provider_key_changed:
+        OMNIROUTE_API_KEY = os.environ.get("OMNIROUTE_API_KEY", "").strip() or OMNIROUTE_FEATURE_KEYS.get("chat", "") or "local"
+        TEXT_PROVIDERS = [
+            {"name": "groq", "api_key": GROQ_API_KEY, "base_url": GROQ_BASE_URL, "models": GROQ_CHAT_MODELS},
+            {"name": "openrouter", "api_key": OPENROUTER_API_KEY, "base_url": OPENROUTER_BASE_URL, "models": [OPENROUTER_CHAT_MODEL]},
+            {"name": "omniroute", "api_key": OMNIROUTE_API_KEY, "base_url": OMNIROUTE_BASE_URL, "models": [OMNIROUTE_CHAT_MODEL]},
+            {"name": "freellmapi", "api_key": FREELLMAPI_API_KEY, "base_url": FREELLMAPI_BASE_URL, "models": ["auto"]},
+        ]
+
+
+@app.before_request
+def _sync_keys_from_extension():
+    if request.method != "POST" or not request.is_json:
+        return
+    body = request.get_json(silent=True) or {}
+    overrides = body.get("api_keys")
+    if isinstance(overrides, dict):
+        _apply_key_overrides(overrides)
+
+
 YTDLP_CMD = ["yt-dlp"]
 
 # ==================== BELLEK-İÇİ CACHE ====================
@@ -2230,6 +2299,25 @@ def health():
         "groq_configured": bool(GROQ_API_KEY),
         "ytdlp_available": check_ytdlp_available(),
         "ffmpeg_available": check_ffmpeg_available(),
+    })
+
+
+@app.route("/api/keys/sync", methods=["POST"])
+def api_keys_sync():
+    """Uzanti chrome.storage.sync'teki anahtarlari bu ucla PROAKTIF olarak
+    gonderir (panel acildiginda / anahtarlar degistiginde) -- boylece yeni
+    bir bilgisayarda .env hic elle duzenlenmeden, sadece ayni Chrome hesabina
+    giris yapip uzantiyi yukleyerek calisir hale gelir. Asil uygulama zaten
+    her POST istegindeki 'api_keys' alanini otomatik isler (bkz.
+    _sync_keys_from_extension); bu uc sadece anlik bir onay donmek icin var."""
+    body = request.get_json(silent=True) or {}
+    overrides = body.get("api_keys", {})
+    _apply_key_overrides(overrides)
+    return jsonify({
+        "ok": True,
+        "groq_configured": bool(GROQ_API_KEY),
+        "openrouter_configured": bool(OPENROUTER_API_KEY),
+        "freellmapi_configured": bool(FREELLMAPI_API_KEY),
     })
 
 

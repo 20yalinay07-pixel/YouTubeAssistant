@@ -12,3 +12,4 @@ Uninstall.bat
 start_hidden.vbs
 start_server.bat
 start_omniroute.bat
+*.log

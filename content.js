@@ -209,10 +209,11 @@ function maybeShowLangHint() {
 }
 
 async function callBackendAPI(endpoint, data) {
+    const apiKeys = await getSyncedApiKeys();
     const response = await fetch(`${BACKEND_URL}${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data)
+        body: JSON.stringify({ ...data, api_keys: apiKeys })
     });
     if (!response.ok) {
         const error = await response.json().catch(() => ({}));
@@ -1111,10 +1112,11 @@ let transcriptCurrentLang = 'default';
 async function streamTranscriptTranslation(lang, onProgress, onDone, onError) {
     let response;
     try {
+        const apiKeys = await getSyncedApiKeys();
         response = await fetch(`${BACKEND_URL}/api/transcript/translate/stream`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ url: window.location.href, lang })
+            body: JSON.stringify({ url: window.location.href, lang, api_keys: apiKeys })
         });
     } catch (e) {
         onError(e);
@@ -1278,6 +1280,59 @@ const LICENSE_LAST_CHECK_STORAGE = 'ytai_license_last_check';
 const LICENSE_INSTANCE_ID_STORAGE = 'ytai_license_instance_id';
 const LICENSE_RECHECK_INTERVAL_MS = 12 * 60 * 60 * 1000; // 12 saatte bir Lemon Squeezy'den yeniden doğrula
 
+// Kullanicinin kendi AI saglayici anahtarlari artik .env dosyasina degil
+// chrome.storage.sync'e yaziliyor -- Chrome hesabina baglandigi icin ayni
+// hesapla giris yapilan HER bilgisayarda otomatik gorunur, elle .env
+// duzenlemeye veya ayri bir kurulum sihirbazi calistirmaya gerek kalmaz.
+// Yerel backend bu anahtarlari KENDISI SAKLAMAZ -- her API cagrisinda
+// (bkz. callBackendAPI) birlikte gonderilir, backend surec-genelinde
+// bellekte tutar (bkz. server.py: _apply_key_overrides).
+const SYNCED_API_KEYS_STORAGE = 'ytai_api_keys';
+const SYNCED_API_KEY_FIELDS = [
+    { key: 'GROQ_API_KEY', label: 'Groq (önerilen)' },
+    { key: 'OPENROUTER_API_KEY', label: 'OpenRouter (yedek)' },
+    { key: 'FREELLMAPI_API_KEY', label: 'FreeLLMAPI (tek anahtar alternatifi)' },
+    { key: 'ASSEMBLYAI_API_KEY_SUMMARIZE', label: 'AssemblyAI - Özetleyici' },
+    { key: 'ASSEMBLYAI_API_KEY_CHAPTERS', label: 'AssemblyAI - Bölümleyici' },
+    { key: 'EXA_SEARCH_API_KEY', label: 'Exa Search' },
+    { key: 'OMNIROUTE_KEY_CHAT', label: 'OmniRoute - Chat' },
+    { key: 'OMNIROUTE_KEY_SUMMARIZE', label: 'OmniRoute - Özetleyici' },
+    { key: 'OMNIROUTE_KEY_ANALYZE', label: 'OmniRoute - Transkriptor' },
+    { key: 'OMNIROUTE_KEY_RECOMMENDATIONS', label: 'OmniRoute - Video önerici' },
+    { key: 'OMNIROUTE_KEY_CHAPTERS', label: 'OmniRoute - Video bölümleyici' },
+];
+
+function getSyncedApiKeys() {
+    return new Promise((resolve) => {
+        try {
+            chrome.storage.sync.get([SYNCED_API_KEYS_STORAGE], (result) => {
+                resolve((result && result[SYNCED_API_KEYS_STORAGE]) || {});
+            });
+        } catch (e) { resolve({}); }
+    });
+}
+
+function setSyncedApiKeys(keys) {
+    return new Promise((resolve) => {
+        try {
+            chrome.storage.sync.set({ [SYNCED_API_KEYS_STORAGE]: keys }, () => resolve(true));
+        } catch (e) { resolve(false); }
+    });
+}
+
+async function pushApiKeysToBackend(keys) {
+    try {
+        const res = await fetch(`${BACKEND_URL}/api/keys/sync`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ api_keys: keys }),
+        });
+        return res.ok;
+    } catch (e) {
+        return false;
+    }
+}
+
 function getStoredInstanceId() {
     try { return localStorage.getItem(LICENSE_INSTANCE_ID_STORAGE) || ''; } catch (e) { return ''; }
 }
@@ -1398,6 +1453,27 @@ function buildExtraTabPanelHTML() {
             </div>
             <p id="extra-ad-desc" style="color:#bbb; font-size:11px; margin:0;">${ui('extraAdSkipDesc')}</p>
         </div>
+
+        <details style="background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:10px; padding:12px; margin-top:12px;">
+            <summary style="color:#bbb; font-size:12px; cursor:pointer; outline:none;">🔑 API Anahtarları</summary>
+            <p style="color:#777; font-size:10px; margin:8px 0; line-height:1.4;">
+                Sadece Groq (veya tek başına FreeLLMAPI) yeterlidir, gerisi isteğe bağlıdır.
+                Buraya girilenler bu bilgisayarda değil, Chrome hesabınıza (chrome.storage.sync)
+                kaydedilir -- aynı hesapla giriş yaptığınız diğer bilgisayarlarda da otomatik görünür,
+                .env dosyası düzenlemeye gerek kalmaz.
+            </p>
+            <div id="api-keys-fields">
+                ${SYNCED_API_KEY_FIELDS.map(({ key, label }) => `
+                    <div style="margin-bottom:6px;">
+                        <label style="color:#999; font-size:10px; display:block; margin-bottom:2px;">${label}</label>
+                        <input id="api-key-input-${key}" type="password"
+                            style="width:100%; box-sizing:border-box; padding:6px 8px; border-radius:6px; border:1px solid rgba(255,255,255,0.15); background:rgba(255,255,255,0.05); color:white; font-size:11px; font-family:ui-monospace,monospace; outline:none;">
+                    </div>
+                `).join('')}
+            </div>
+            <button id="api-keys-save-btn" style="margin-top:6px; padding:7px 14px; border:none; border-radius:8px; background:linear-gradient(135deg,#ffd200,#ff9d00); color:#1a1a1a; font-weight:700; font-size:12px; cursor:pointer;">Kaydet</button>
+            <p id="api-keys-status" style="font-size:11px; margin:8px 0 0;"></p>
+        </details>
     `;
 }
 
@@ -1459,6 +1535,40 @@ function wireExtraTabEvents() {
     };
 
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter') btn.click(); });
+
+    // API anahtarları alanlarını chrome.storage.sync'ten doldur (input'lar
+    // buildExtraTabPanelHTML'de senkron/boş çizildiği için buradan asenkron
+    // olarak dolduruluyor).
+    getSyncedApiKeys().then((keys) => {
+        SYNCED_API_KEY_FIELDS.forEach(({ key }) => {
+            const field = document.getElementById(`api-key-input-${key}`);
+            if (field && keys[key]) field.value = keys[key];
+        });
+    });
+
+    const apiKeysSaveBtn = document.getElementById('api-keys-save-btn');
+    const apiKeysStatus = document.getElementById('api-keys-status');
+    if (apiKeysSaveBtn) {
+        apiKeysSaveBtn.onclick = async () => {
+            const keys = {};
+            SYNCED_API_KEY_FIELDS.forEach(({ key }) => {
+                const field = document.getElementById(`api-key-input-${key}`);
+                if (field) keys[key] = field.value.trim();
+            });
+            apiKeysSaveBtn.disabled = true;
+            apiKeysStatus.style.color = '#999';
+            apiKeysStatus.textContent = 'Kaydediliyor...';
+
+            await setSyncedApiKeys(keys);
+            const pushed = await pushApiKeysToBackend(keys);
+
+            apiKeysStatus.style.color = pushed ? '#4fd6a3' : '#ff9d00';
+            apiKeysStatus.textContent = pushed
+                ? '✅ Kaydedildi ve senkronize edildi -- Chrome hesabınızdaki diğer bilgisayarlarda da otomatik görünecek.'
+                : '⚠️ Chrome hesabınıza kaydedildi ama yerel backend\'e ulaşılamadı (arka plan servisi çalışıyor mu?).';
+            apiKeysSaveBtn.disabled = false;
+        };
+    }
 }
 
 // Panel her açıldığında (sayfa yüklendiğinde) daha önce girilmiş bir anahtar
@@ -1518,6 +1628,18 @@ function stopAdAutoSkip() {
 if (getPremiumState(PREMIUM_KEYS.adSkip)) {
     startAdAutoSkip();
 }
+
+// Chrome hesabında senkronize edilmiş API anahtarları varsa, yerel backend'e
+// (yeni bir bilgisayarda ilk kez çalışıyor olabilir, henüz hiç anahtarı yok)
+// PROAKTİF olarak gönder -- kullanıcı hiçbir AI özelliğine tıklamadan önce bile
+// backend doğru şekilde yapılandırılmış olsun. Backend ayakta değilse (henüz
+// başlamamışsa) sessizce başarısız olur, bir sonraki gerçek API çağrısında
+// (callBackendAPI zaten her istekte anahtarları gönderir) otomatik düzelir.
+getSyncedApiKeys().then((keys) => {
+    if (keys && Object.keys(keys).length) {
+        pushApiKeysToBackend(keys);
+    }
+});
 
 // ==================== BAŞLAT ====================
 // Panel'i (docked konumdaysa) buton gerekmeden otomatik açar. #secondary

@@ -46,88 +46,59 @@ Transcript extraction itself went through its own round of fixes: an outdated AP
 
 ## Setup
 
-**Easiest path: the Setup wizard.**
+**1) Load the extension.** Go to `chrome://extensions` → enable **Developer mode** → **Load unpacked** → select this project folder (if a previous version is already loaded, just hit ⟳ reload).
 
-1. Download `YouTubeAssistantSetup.exe` from [Releases](../../releases) and run it from inside the extracted project folder.
-2. Paste in your own API key(s) and click **Kur ve Başlat**. It checks for Python and Node.js and silently installs whichever is missing (via `winget`), installs the backend/PO-Token-server dependencies, writes your `.env`, starts the background service, and optionally adds it to Windows startup. There's also a checkbox to install [OmniRoute](https://github.com/ImbranDarwis/OmniRoute) itself if you want it (advanced, optional — Groq/OpenRouter alone are enough).
-3. It then opens `chrome://extensions` for you — turn on **Developer mode**, click **Load unpacked**, and select the project folder.
-
-Nobody's keys are bundled in it — it only ever writes the keys *you* type into your own local `.env` (source: [installer/setup_wizard.py](installer/setup_wizard.py)). Run `YouTubeAssistantUninstall.exe` (also on the Releases page) any time to remove the auto-start entry and stop the background service — it doesn't touch your project folder or `.env`.
-
-Prefer to do it by hand? Keep reading:
-
-**0) Add your API keys.** This repo does not include a `.env` file (it's in `.gitignore`, for safety reasons). Create one in the project root — **only `GROQ_API_KEY` (or the single `FREELLMAPI_API_KEY` below) is actually required**; everything else is an optional extra that's automatically skipped if left blank:
-
-```
-GROQ_API_KEY=...
-OPENROUTER_API_KEY=...
-```
-
-Optional extras — safe to leave blank if you don't use them:
-
-```
-OMNIROUTE_KEY_CHAT=...            # only if you've set up your own OmniRoute instance
-OMNIROUTE_KEY_SUMMARIZE=...
-OMNIROUTE_KEY_ANALYZE=...
-OMNIROUTE_KEY_RECOMMENDATIONS=...
-OMNIROUTE_KEY_CHAPTERS=...
-ASSEMBLYAI_API_KEY_SUMMARIZE=...  # improves chapter quality
-ASSEMBLYAI_API_KEY_CHAPTERS=...
-EXA_SEARCH_API_KEY=...            # verifies recommended videos actually exist
-```
-
-Without at least one text provider key the backend can't make any AI call. It's loaded automatically on startup via `python-dotenv` — nothing is hardcoded in the source.
-
-**Alternative: one key instead of five.** Signing up for Groq, OmniRoute, AssemblyAI (twice) and Exa separately is real setup friction if you're not the original author. [FreeLLMAPI](https://github.com/tashfeenahmed/freellmapi) is a self-hosted proxy that aggregates 34+ free-tier LLM providers behind a single OpenAI-compatible key:
-
-```bash
-curl -fsSL https://freellmapi.co/install.sh | bash
-```
-
-Add provider keys and grab your unified key from its dashboard at `http://localhost:3001`, then in your `.env` set just:
-
-```
-FREELLMAPI_API_KEY=freellmapi-your-unified-key
-```
-
-The backend already treats it as an extra fallback provider (after Groq, OpenRouter, and OmniRoute) — if you skip the other keys entirely, this one alone is enough to make every AI feature work. It requires Docker; if that's not something you want running, stick with the individual keys above.
-
-**1) Backend dependencies:**
+**2) Backend dependencies** (the extension talks to a small local Flask server — this still runs on your own machine, so nothing you do here gets billed to anyone):
 
 ```bash
 cd YouTubeAssistant/backend
 pip install -r requirements.txt
 ```
 
-**2) PO Token server dependencies** — `pot_server/node_modules` isn't in the repo either (too large; `npm install` regenerates it):
+**3) PO Token server dependencies** — `pot_server/node_modules` isn't in the repo either (too large; `npm install` regenerates it):
 
 ```bash
 cd YouTubeAssistant/pot_server
 npm install
 ```
 
-**3) Start the backend:**
+**4) Start the backend:**
 
 ```bash
 cd YouTubeAssistant/backend
 python server.py
 ```
 
-(Or run `start_hidden.vbs` to bring up everything at once — backend, AI router, and PO Token server — with no visible window.)
+**5) Add your API keys — inside the extension, not a file.** Open any YouTube video, click the gold **⭐ Extra Features** button, expand **🔑 API Anahtarları**, paste in your own key(s), and hit **Kaydet**. Only Groq (or the single FreeLLMAPI key below) is actually required; everything else is an optional extra that's skipped automatically if left blank.
 
-Then go to `chrome://extensions` → enable Developer mode → **Load unpacked** → select the project folder (if a previous version is already loaded, just hit ⟳ reload).
+These keys are saved with `chrome.storage.sync` — tied to your Chrome/Google account, not this one computer. Sign into the same Chrome account on another machine, run the same two setup steps there (load the extension, start the local backend), and your keys show up automatically — no `.env` file to copy over, no separate installer to run. The keys are pushed to whichever local backend the extension is currently talking to on every request, so a freshly-started backend picks them up the moment you open a video.
 
-### Keeping it running in the background
+Where to get each one:
 
-- **`backend/tray_launcher.py`** starts both the AI router and the backend, and shows an icon in the system tray. Right-click it to restart the server, open the logs, or quit — handy after a code change.
-- **`start_hidden.vbs`** launches `tray_launcher.py` with no console window — this is what you'd normally run day to day.
-- **`start_server.bat`** is an older, console-visible fallback for troubleshooting; it auto-restarts the backend on crash but has no tray icon.
+| Key | Get it from |
+|---|---|
+| Groq (recommended) | [console.groq.com/keys](https://console.groq.com/keys) — free, ready in seconds |
+| OpenRouter (backup) | [openrouter.ai/keys](https://openrouter.ai/keys) — kicks in if Groq/FreeLLMAPI fail |
+| AssemblyAI ×2 (optional) | [assemblyai.com/dashboard/signup](https://www.assemblyai.com/dashboard/signup) — improves chapter quality |
+| Exa Search (optional) | [dashboard.exa.ai/api-keys](https://dashboard.exa.ai/api-keys) — verifies recommended videos actually exist |
+| OmniRoute ×5 (advanced, optional) | [omniroute.online](https://www.omniroute.online/) — only if you've set it up yourself |
 
-**To start automatically at Windows login:** press `Win + R`, type `shell:startup`, right-click `start_hidden.vbs` → **Create shortcut**, then move that shortcut into the Startup folder that just opened. From then on the backend and AI router start silently in the background on every login.
+**Alternative: one key instead of five.** Signing up for Groq, AssemblyAI (twice), Exa, and OmniRoute separately is real setup friction if you're not the original author. [FreeLLMAPI](https://github.com/tashfeenahmed/freellmapi) is a self-hosted proxy that aggregates 34+ free-tier LLM providers behind a single OpenAI-compatible key:
 
-**To verify it's running:** double-click `start_hidden.vbs`, wait a few seconds, check for the tray icon (you may need to expand the hidden icons next to the clock), then open `http://127.0.0.1:8000/health` in a browser — a JSON response means it's alive.
+```bash
+curl -fsSL https://freellmapi.co/install.sh | bash
+```
 
-**Troubleshooting:** open `backend/tray_launcher.log` (also reachable via right-click the tray icon → "Open Logs") — both the AI router's and the backend's output, plus any errors, accumulate there.
+Add provider keys and grab your unified key from its dashboard at `http://localhost:3001`, then paste just that one key into the **FreeLLMAPI** field in the extension's panel. It's treated as an extra fallback provider (after Groq/OpenRouter/OmniRoute) — skip the other keys entirely and this one alone is enough to make every AI feature work. Requires Docker; if that's not something you want running, stick with the individual keys above.
+
+**Prefer a `.env` file instead** (self-hosting, scripting, or just old habits)? It still works exactly as before — same variable names as the table above (`GROQ_API_KEY`, `OPENROUTER_API_KEY`, `OMNIROUTE_KEY_CHAT/SUMMARIZE/ANALYZE/RECOMMENDATIONS/CHAPTERS`, `ASSEMBLYAI_API_KEY_SUMMARIZE/CHAPTERS`, `EXA_SEARCH_API_KEY`, `FREELLMAPI_API_KEY`), loaded automatically via `python-dotenv` at startup. Anything the extension pushes in simply takes priority over it while the extension is running.
+
+### Keeping the backend running in the background
+
+- **`backend/tray_launcher.py`** starts both the AI router and the backend, and shows an icon in the system tray. Right-click it to restart the server, open the logs, or quit — handy after a code change. Run it directly (`python tray_launcher.py`) or via a shortcut you create yourself.
+- **To start automatically at Windows login:** create a shortcut to `tray_launcher.py` (or a small `.vbs`/`.bat` wrapper of your own) and drop it into the Startup folder (`Win + R` → `shell:startup`).
+- **To verify it's running:** open `http://127.0.0.1:8000/health` in a browser — a JSON response means it's alive.
+- **Troubleshooting:** open `backend/tray_launcher.log` (also reachable via right-click the tray icon → "Open Logs") — the AI router's and the backend's output, plus any errors, accumulate there.
 
 ## Extra Features
 
@@ -188,13 +159,10 @@ backend/
   ytdlp_bypass.py      yt-dlp evasion helpers
   requirements.txt
 pot_server/            Local Node.js server that defeats YouTube's 429/bot blocking
-installer/             Setup/Uninstall wizard source + build_exe.bat (packaged into the .exe's on Releases — see Setup)
-content.js              Chrome content script — the panel UI itself, including Lemon Squeezy license verification
+content.js              Chrome content script — the panel UI itself: license verification, the
+                        API-keys panel (chrome.storage.sync), and the AI feature tabs
 manifest.json           Extension manifest (Manifest V3)
-start_hidden.vbs        Launches everything with no visible window
-start_server.bat        Console-visible fallback launcher (no tray icon)
-Uninstall.bat           Same as YouTubeAssistantUninstall.exe, as a plain script (no download needed)
-.env                    Your own API keys (not committed — see Setup)
+.env                    Optional — only if you prefer a file over the extension's own panel (see Setup)
 ```
 
 ---
