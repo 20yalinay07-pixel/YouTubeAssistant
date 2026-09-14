@@ -46,11 +46,17 @@ Transcript extraction itself went through its own round of fixes: an outdated AP
 
 ## Setup
 
-**Easiest path: the Setup wizard.** Download `YouTubeAssistantSetup.exe` from [Releases](../../releases), run it from inside the extracted project folder, paste in your own API key(s), and click **Kur ve Başlat**. It checks for Python and Node.js and silently installs whichever is missing (via `winget`), installs the backend/PO-Token-server dependencies, writes your `.env`, starts the background service, optionally adds it to Windows startup, and opens the Chrome extension-loading page for you. There's also a checkbox to install [OmniRoute](https://github.com/ImbranDarwis/OmniRoute) itself if you want it (advanced, optional — Groq/OpenRouter alone are enough). Nobody's keys are bundled in it — it only ever writes the keys *you* type into your own local `.env` (source: [installer/setup_wizard.py](installer/setup_wizard.py)). Run `YouTubeAssistantUninstall.exe` (also on the Releases page) any time to remove the auto-start entry and stop the background service — it doesn't touch your project folder or `.env`.
+**Easiest path: the Setup wizard.**
+
+1. Download `YouTubeAssistantSetup.exe` from [Releases](../../releases) and run it from inside the extracted project folder.
+2. Paste in your own API key(s) and click **Kur ve Başlat**. It checks for Python and Node.js and silently installs whichever is missing (via `winget`), installs the backend/PO-Token-server dependencies, writes your `.env`, starts the background service, and optionally adds it to Windows startup. There's also a checkbox to install [OmniRoute](https://github.com/ImbranDarwis/OmniRoute) itself if you want it (advanced, optional — Groq/OpenRouter alone are enough).
+3. It then opens `chrome://extensions` for you — turn on **Developer mode**, click **Load unpacked**, and select the project folder.
+
+Nobody's keys are bundled in it — it only ever writes the keys *you* type into your own local `.env` (source: [installer/setup_wizard.py](installer/setup_wizard.py)). Run `YouTubeAssistantUninstall.exe` (also on the Releases page) any time to remove the auto-start entry and stop the background service — it doesn't touch your project folder or `.env`.
 
 Prefer to do it by hand? Keep reading:
 
-**0) Add your API keys.** This repo does not include a `.env` file (it's in `.gitignore`, for your own safety). Create one in the project root — **only `GROQ_API_KEY` (or the single `FREELLMAPI_API_KEY` below) is actually required**; everything else is an optional extra that's automatically skipped if left blank:
+**0) Add your API keys.** This repo does not include a `.env` file (it's in `.gitignore`, for safety reasons). Create one in the project root — **only `GROQ_API_KEY` (or the single `FREELLMAPI_API_KEY` below) is actually required**; everything else is an optional extra that's automatically skipped if left blank:
 
 ```
 GROQ_API_KEY=...
