@@ -1335,18 +1335,14 @@ function getStoredInstanceId() {
     try { return localStorage.getItem(LICENSE_INSTANCE_ID_STORAGE) || ''; } catch (e) { return ''; }
 }
 
-// GERÇEK premium durumu artık localStorage'da TUTULMUYOR -- sadece bu içerik
-// betiğinin kendi izole JS dünyasında (LIVE_PREMIUM_STATE), SADECE gerçek bir
-// Lemon Squeezy doğrulaması SONUCUNDA yazılıyor. Sayfanın varsayılan DevTools
-// konsolu, sayfanın KENDİ (ana) JS dünyasında çalışır -- içerik betiğinin bu
-// değişkenine erişemez/göremez. Yani "localStorage.setItem(...)" ile premium'u
-// sahte açma artık İŞE YARAMAZ (hiçbir kod artık o anahtarı okumuyor).
-// NOT: DevTools'un "context" menüsünden bilerek içerik betiği dünyasına geçen
-// ya da kaynağı indirip değiştirip yeniden yükleyen ileri düzey bir kullanıcı
-// yine de aşabilir -- açık kaynaklı/istemci tarafı çalışan hiçbir kod için bu
-// tamamen engellenemez. Bu değişiklik sadece rastgele "konsola tek satır
-// yapıştır" tarzı bypass'ı kapatıyor.
-const LIVE_PREMIUM_STATE = { unlimitedChat: false, adSkip: false };
+// GEÇİCİ: Lemon Squeezy mağaza başvurumuzu reddetti (hesap satışa açılamadı),
+// yani şu an gerçek bir ödeme/lisans akışı YOK. Ürün de henüz kimse tarafından
+// bilinmediği için, satılamayan bir özelliği kilitli tutmanın anlamı yok --
+// ⭐ Extra Features herkese ÜCRETSİZ açık. Lemon Squeezy tarafı (ileride bir
+// itiraz/başka bir işlemci ile) tekrar aktif olursa, bu iki değeri false'a
+// çevirip verifyLicenseKey akışını (aşağıda hâlâ duruyor, silinmedi) yeniden
+// bağlamak yeterli.
+const LIVE_PREMIUM_STATE = { unlimitedChat: true, adSkip: true };
 
 function getPremiumState(key) {
     if (key === PREMIUM_KEYS.unlimitedChat) return LIVE_PREMIUM_STATE.unlimitedChat;
@@ -1430,8 +1426,6 @@ async function verifyLicenseKey(key) {
 function buildExtraTabPanelHTML() {
     const chatOn = getPremiumState(PREMIUM_KEYS.unlimitedChat);
     const adSkipOn = getPremiumState(PREMIUM_KEYS.adSkip);
-    const storedKey = getStoredLicenseKey();
-    const storedPlan = (() => { try { return localStorage.getItem(LICENSE_PLAN_STORAGE) || ''; } catch (e) { return ''; } })();
 
     return `
         <div style="display:flex; justify-content:space-between; align-items:center; margin:0 0 4px 0;">
@@ -1440,15 +1434,9 @@ function buildExtraTabPanelHTML() {
         </div>
         <p id="extra-subtitle" style="color:#999; font-size:11px; margin:0 0 12px 0;">${ui('extraSubtitle')}</p>
 
-        <div style="background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1); border-radius:10px; padding:12px; margin-bottom:14px;">
-            <label style="color:#bbb; font-size:11px; display:block; margin-bottom:6px;">${ui('extraLicenseLabel')}</label>
-            <div style="display:flex; gap:6px;">
-                <input id="license-key-input" type="text" value="${storedKey}" placeholder="${ui('extraLicensePlaceholder')}"
-                    style="flex:1; min-width:0; padding:8px 10px; border-radius:8px; border:1px solid rgba(255,255,255,0.2); background:rgba(255,255,255,0.05); color:white; font-size:12px; font-family:ui-monospace,monospace; outline:none;">
-                <button id="license-activate-btn" style="padding:8px 14px; border:none; border-radius:8px; background:linear-gradient(135deg,#ffd200,#ff9d00); color:#1a1a1a; font-weight:700; font-size:12px; cursor:pointer; flex-shrink:0;">${ui('extraLicenseActivate')}</button>
-            </div>
-            <p id="license-status" style="color:${storedKey ? (chatOn || adSkipOn ? '#4fd6a3' : '#ff5d5d') : '#999'}; font-size:11px; margin:8px 0 0;">${storedKey ? (chatOn || adSkipOn ? ui('extraLicenseValid', storedPlan) : ui('extraLicenseInvalid')) : ui('extraLicenseNone')}</p>
-            <a id="license-buy-link" href="${LICENSE_MARKETING_URL}" target="_blank" rel="noopener" style="display:inline-block; margin-top:8px; color:#ffd200; font-size:11px; text-decoration:none;">${ui('extraBuyLink')}</a>
+        <div style="background:rgba(79,214,163,0.08); border:1px solid rgba(79,214,163,0.25); border-radius:10px; padding:12px; margin-bottom:14px;">
+            <p style="color:#4fd6a3; font-weight:600; font-size:12px; margin:0;">🎉 Şu anda herkese ücretsiz</p>
+            <p style="color:#bbb; font-size:11px; margin:6px 0 0;">Aşağıdaki iki özellik geçici olarak lisans anahtarı gerekmeden herkese açık.</p>
         </div>
 
         <div style="background:${chatOn ? 'rgba(255,210,0,0.06)' : 'rgba(255,255,255,0.03)'}; border:1px solid ${chatOn ? 'rgba(255,210,0,0.18)' : 'rgba(255,255,255,0.08)'}; border-radius:10px; padding:12px; margin-bottom:12px; opacity:${chatOn ? '1' : '0.7'};">
@@ -1510,45 +1498,6 @@ function refreshExtraTabFeatureBadges() {
 function wireExtraTabEvents() {
     document.getElementById('close-settings').onclick = () => toggleSettingsOverlay();
 
-    const input = document.getElementById('license-key-input');
-    const btn = document.getElementById('license-activate-btn');
-    const status = document.getElementById('license-status');
-
-    btn.onclick = async () => {
-        const key = input.value.trim().toUpperCase();
-        btn.disabled = true;
-        const prevText = btn.textContent;
-        btn.textContent = ui('extraLicenseChecking');
-        status.style.color = '#999';
-        status.textContent = ui('extraLicenseChecking');
-
-        const result = await verifyLicenseKey(key);
-        try { localStorage.setItem(LICENSE_KEY_STORAGE, key); } catch (e) { /* yoksay */ }
-
-        if (result.networkError) {
-            status.style.color = '#ff9d00';
-            status.textContent = ui('extraLicenseNetworkError');
-        } else if (result.valid) {
-            status.style.color = '#4fd6a3';
-            status.textContent = ui('extraLicenseValid', result.plan || '');
-        } else {
-            status.style.color = '#ff5d5d';
-            status.textContent = ui('extraLicenseInvalid');
-        }
-
-        btn.disabled = false;
-        btn.textContent = prevText;
-        refreshExtraTabFeatureBadges();
-        // Panel içeriğini (✓/— rozetleri) tazelemek için yeniden çiz.
-        const container = document.getElementById('settings-overlay');
-        if (container) {
-            container.innerHTML = buildExtraTabPanelHTML();
-            wireExtraTabEvents();
-        }
-    };
-
-    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') btn.click(); });
-
     // API anahtarları alanlarını chrome.storage.sync'ten doldur (input'lar
     // buildExtraTabPanelHTML'de senkron/boş çizildiği için buradan asenkron
     // olarak dolduruluyor).
@@ -1584,28 +1533,25 @@ function wireExtraTabEvents() {
     }
 }
 
-// Sayfa her yüklendiğinde (video değişimi DEĞİL -- YouTube'un SPA navigasyonu
-// aynı script örneğini korur, bkz. dosya sonundaki MutationObserver) daha önce
-// girilmiş bir anahtar varsa MUTLAKA sunucudan doğrula. ÖNEMLİ: LIVE_PREMIUM_STATE
-// artık kalıcı DEĞİL (bilerek -- konsoldan sahte açmaya karşı), yani her sayfa
-// yüklemesinde false'tan başlıyor; gerçek durumun geri gelmesi için bu kontrolün
-// HER SEFERİNDE (eski 12 saatlik eşiğe takılmadan) çalışması şart. Lemon
-// Squeezy'nin 60 istek/dk limiti için risk yok, bu sekme/sayfa başına bir kez
-// çalışıyor. Ağ hatasında sessizce false kalır (kullanıcı offline'ken tüm
-// özellikleri açık bırakmak güvenlik amacını bozar; bir sonraki sayfa
-// yüklemesinde/yeniden bağlanınca otomatik düzelir).
-(function initLicenseRecheck() {
-    const key = getStoredLicenseKey();
-    if (!key) return;
-    verifyLicenseKey(key).then(() => {
-        refreshExtraTabFeatureBadges();
-        const container = document.getElementById('settings-overlay');
-        if (container) {
-            container.innerHTML = buildExtraTabPanelHTML();
-            wireExtraTabEvents();
-        }
-    });
-})();
+// GEÇİCİ OLARAK DEVRE DIŞI: LIVE_PREMIUM_STATE artık varsayılan olarak true
+// (bkz. tanımı) -- Lemon Squeezy mağazası aktif olmadığı için gerçek bir
+// lisans akışı yok. Bu kontrolü şimdi çalıştırırsak, eskiden bir anahtar
+// girmiş olan (artık hiçbir işe yaramayan) kullanıcılarda Lemon Squeezy'den
+// dönecek "invalid/inactive" sonucu ücretsiz varsayılanı YANLIŞLIKLA false'a
+// çevirirdi. Lemon Squeezy tekrar aktif olduğunda bu bloğu geri açmak yeterli
+// (verifyLicenseKey fonksiyonu hâlâ aşağıda duruyor, silinmedi).
+// (function initLicenseRecheck() {
+//     const key = getStoredLicenseKey();
+//     if (!key) return;
+//     verifyLicenseKey(key).then(() => {
+//         refreshExtraTabFeatureBadges();
+//         const container = document.getElementById('settings-overlay');
+//         if (container) {
+//             container.innerHTML = buildExtraTabPanelHTML();
+//             wireExtraTabEvents();
+//         }
+//     });
+// })();
 
 // ---- Reklamları otomatik geçme ----
 // Sadece YouTube'un KENDİ "Reklamı geç" butonuna otomatik tıklar ve reklam

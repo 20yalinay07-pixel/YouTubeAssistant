@@ -108,47 +108,7 @@ A gold **⭐ Extra Features** button at the bottom of the main menu toggles two 
 
 **⏩ Auto Ad Skip** — auto-clicks YouTube's own "Skip Ad" button the instant it appears, and briefly speeds up playback during the mandatory pre-skip portion of an ad. It doesn't block ad requests or remove ad elements from the page — it only clicks YouTube's own button and adjusts playback speed, so it isn't expected to trigger the usual ad-blocker warnings. YouTube could still change how it detects this in the future; just turn the switch off if that ever happens.
 
-Unlocking them for real (as paid subscriptions) is covered next.
-
-## Premium: selling Ad-Skip and Unlimited Chat
-
-The ⭐ Extra Features can be sold as real paid subscriptions — with **no backend of our own at all**. The extension talks directly to [Lemon Squeezy's License API](https://docs.lemonsqueezy.com/help/licensing/license-api), which generates, stores, and validates the license keys. This keeps there being exactly one source of truth for "is this key valid" — no separate database, no webhook server, no admin login exposed to the internet.
-
-```
-Buyer's browser --checkout--> Lemon Squeezy (hosted store + checkout)
-                                     |
-                              generates a license key
-                                     |
-Extension ---- POST api.lemonsqueezy.com/v1/licenses/activate / validate ----> unlocks features
-```
-
-- Card data never touches this project's code — checkout happens entirely on Lemon Squeezy's hosted page.
-- **You** control the payout bank account/card in Lemon Squeezy's own dashboard (Settings → Payouts) — not something this app builds a screen for.
-- Subscribers, revenue, and refunds are all visible in Lemon Squeezy's own dashboard — no separate admin panel to run or secure.
-
-**1) Create your 3 products** in your [Lemon Squeezy store](https://digitalhelperforall.lemonsqueezy.com):
-
-| Product | Price |
-|---|---|
-| Bundle (unlimited chat + ad skip) | $40/month |
-| Unlimited Chat only | $30/month |
-| Ad Skip only | $15/month |
-
-For each product's variant, turn on **"Generate license key"** in its settings (do *not* leave it off — the extension depends on this). Recommended: leave the activation limit high or unlimited, since one buyer may reinstall the extension or use more than one browser.
-
-**2) Get each variant's ID.** Open a product in the Lemon Squeezy dashboard — the variant ID is the numeric ID shown in the URL or in the product's API response.
-
-**3) Wire the variant IDs to plans.** In `content.js`, fill in the mapping near the top of the Extra Features section:
-
-```js
-const LS_VARIANT_TO_PLAN = {
-    123456: 'bundle',
-    123457: 'chat',
-    123458: 'adskip',
-};
-```
-
-That's it — no deployment, no database, no server to keep running. A buyer subscribes on your Lemon Squeezy store, gets their license key by email (Lemon Squeezy sends this automatically), pastes it into the ⭐ Extra Features panel, and the extension calls Lemon Squeezy directly to activate it and unlock exactly what they paid for. Every 12 hours it silently re-validates, so a cancelled subscription stops working within that window.
+**Both are currently free for everyone** — no license key needed. The plan was to sell them as paid subscriptions through Lemon Squeezy's License API (no backend of our own, extension talks to Lemon Squeezy directly), but our store application was rejected there, so that's on hold for now. The verification code is still in `content.js`, just not wired up to anything.
 
 ## Project layout
 
@@ -159,8 +119,9 @@ backend/
   ytdlp_bypass.py      yt-dlp evasion helpers
   requirements.txt
 pot_server/            Local Node.js server that defeats YouTube's 429/bot blocking
-content.js              Chrome content script — the panel UI itself: license verification, the
-                        API-keys panel (chrome.storage.sync), and the AI feature tabs
+content.js              Chrome content script — the panel UI itself: the API-keys panel
+                        (chrome.storage.sync), the AI feature tabs, and dormant Lemon Squeezy
+                        license code (see Extra Features)
 manifest.json           Extension manifest (Manifest V3)
 .env                    Optional — only if you prefer a file over the extension's own panel (see Setup)
 ```
